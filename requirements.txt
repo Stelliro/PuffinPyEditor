@@ -1,0 +1,5 @@
+PyQt6
+jedi
+qtawesome
+requests
+GitPython

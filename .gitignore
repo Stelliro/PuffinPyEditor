@@ -1,0 +1,86 @@
+# =====================================================================
+# General Python & IDE Files (from your template)
+# =====================================================================
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE / Editor specific
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# =====================================================================
+# PuffinPyEditor Specific Files
+# =====================================================================
+
+# User-specific application settings
+# This file stores window position, last opened files, etc. and should NOT be version controlled.
+puffin_editor_settings.json
+
+# The secret flag file for enabling debug mode. This is for local development only.
+puffin_debug.flag
+
+# Application logs.
+# This pattern correctly ignores all log files (like app.log) while still
+# allowing the empty "logs" directory to be tracked via the .gitkeep file.
+logs/*
+!logs/.gitkeep
