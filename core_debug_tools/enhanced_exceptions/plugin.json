@@ -1,0 +1,7 @@
+{
+    "id": "enhanced_exceptions",
+    "name": "Enhanced Exception Reporter",
+    "author": "AI Assistant",
+    "version": "1.0.0",
+    "description": "Replaces the default crash handler with a developer-friendly dialog showing a detailed traceback. Requires Debug Framework."
+}

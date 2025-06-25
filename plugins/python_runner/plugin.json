@@ -1,0 +1,1 @@
+{ "id": "python_runner", "name": "Python Runner", "author": "PuffinPy Team", "version": "1.0.0", "description": "Adds functionality to run Python scripts (F5).", "entry_point": "plugin_main.py" }

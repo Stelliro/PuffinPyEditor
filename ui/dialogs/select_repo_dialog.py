@@ -1,21 +1,35 @@
 # PuffinPyEditor/ui/dialogs/select_repo_dialog.py
+from typing import Optional, List, Dict, Any
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QListWidget, QListWidgetItem,
-                             QDialogButtonBox, QMessageBox, QLineEdit, QHBoxLayout, QLabel)
+                             QDialogButtonBox, QMessageBox, QLineEdit, QHBoxLayout,
+                             QLabel, QWidget)
 from PyQt6.QtCore import Qt
 from app_core.github_manager import GitHubManager
 
 
 class SelectRepoDialog(QDialog):
-    def __init__(self, github_manager: GitHubManager, parent=None):
+    """
+    A reusable dialog for selecting a GitHub repository from a user's account.
+    Includes a filter for easier navigation.
+    """
+    def __init__(self, github_manager: GitHubManager, parent: Optional[QWidget] = None,
+                 title: str = "Select Target Repository"):
         super().__init__(parent)
         self.github_manager = github_manager
-        self.selected_repo_data = None
-        self.all_repos = []
+        self.selected_repo_data: Optional[Dict[str, Any]] = None
+        self.all_repos: List[Dict[str, Any]] = []
 
-        self.setWindowTitle("Select Target Repository")
+        self.setWindowTitle(title)
         self.setMinimumSize(500, 400)
         self.main_layout = QVBoxLayout(self)
 
+        self._setup_ui()
+        self._connect_signals()
+        self.github_manager.list_repos()
+
+    def _setup_ui(self):
+        """Creates the main UI layout and widgets."""
+        # --- Filter bar ---
         search_layout = QHBoxLayout()
         search_layout.addWidget(QLabel("Filter:"))
         self.filter_edit = QLineEdit()
@@ -23,27 +37,38 @@ class SelectRepoDialog(QDialog):
         search_layout.addWidget(self.filter_edit)
         self.main_layout.addLayout(search_layout)
 
+        # --- Repo list ---
         self.repo_list_widget = QListWidget()
         self.repo_list_widget.itemDoubleClicked.connect(self.accept)
         self.main_layout.addWidget(self.repo_list_widget)
 
+        # --- Button box ---
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        self.button_box.accepted.connect(self.accept)
-        self.button_box.rejected.connect(self.reject)
         self.main_layout.addWidget(self.button_box)
 
+        # Initially disable OK until repos are loaded
         self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
 
-        self._connect_signals()
-        self.github_manager.list_repos()
-
     def _connect_signals(self):
+        """Connects widget signals to their slots."""
         self.github_manager.repos_ready.connect(self._handle_repos_loaded)
         self.github_manager.operation_failed.connect(self._on_load_failed)
         self.filter_edit.textChanged.connect(self._filter_repo_list)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
 
-    def _handle_repos_loaded(self, repos):
+    def closeEvent(self, event):
+        """Overridden to disconnect signals and prevent memory leaks."""
+        try:
+            self.github_manager.repos_ready.disconnect(self._handle_repos_loaded)
+            self.github_manager.operation_failed.disconnect(self._on_load_failed)
+        except TypeError:
+            pass  # Signals might already be disconnected
+        super().closeEvent(event)
+
+    def _handle_repos_loaded(self, repos: List[Dict[str, Any]]):
+        """Callback for when the list of repositories is ready."""
         self.all_repos = sorted(repos, key=lambda r: r['full_name'].lower())
         self._populate_repo_list()
 
@@ -51,37 +76,36 @@ class SelectRepoDialog(QDialog):
             self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(True)
             self.repo_list_widget.setCurrentRow(0)
 
-    def _filter_repo_list(self):
-        filter_text = self.filter_edit.text().lower()
+    def _populate_repo_list(self):
+        """Fills the list widget with repositories matching the current filter."""
         self.repo_list_widget.clear()
+        filter_text = self.filter_edit.text().lower()
 
         for repo in self.all_repos:
             if filter_text in repo['full_name'].lower():
                 item = QListWidgetItem(repo['full_name'])
-                item.setData(1, repo)
+                item.setToolTip(repo.get('description', 'No description'))
+                item.setData(Qt.ItemDataRole.UserRole, repo)
                 self.repo_list_widget.addItem(item)
 
-    def _populate_repo_list(self):
-        self._filter_repo_list()
+    def _filter_repo_list(self):
+        """A slot that calls the populate method when the filter text changes."""
+        self._populate_repo_list()
 
-    def _on_load_failed(self, error_message):
+    def _on_load_failed(self, error_message: str):
+        """Displays an error message if repositories could not be loaded."""
         QMessageBox.critical(self, "Failed to Load Repositories", error_message)
-        self.cleanup()
         self.reject()
 
     def accept(self):
+        """
+        Handles the user clicking "OK" or double-clicking an item.
+        Sets the selected repo data and closes the dialog.
+        """
         current_item = self.repo_list_widget.currentItem()
         if not current_item:
             QMessageBox.warning(self, "No Selection", "Please select a repository.")
             return
 
-        self.selected_repo_data = current_item.data(1)
+        self.selected_repo_data = current_item.data(Qt.ItemDataRole.UserRole)
         super().accept()
-
-    def cleanup(self):
-        """Disconnect signals to avoid issues if dialog is reused."""
-        try:
-            self.github_manager.repos_ready.disconnect(self._handle_repos_loaded)
-            self.github_manager.operation_failed.disconnect(self._on_load_failed)
-        except TypeError:
-            pass  # Signal was already disconnected

@@ -1,0 +1,7 @@
+{
+    "id": "live_log_viewer",
+    "name": "Live Log Viewer",
+    "author": "AI Assistant",
+    "version": "1.0.0",
+    "description": "Adds a tool to launch a separate, real-time log viewer application that persists across application restarts. Requires Debug Framework."
+}

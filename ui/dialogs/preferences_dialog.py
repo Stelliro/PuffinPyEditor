@@ -1,42 +1,56 @@
 # PuffinPyEditor/ui/dialogs/preferences_dialog.py
 import uuid
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QTabWidget, QWidget,
-                             QLabel, QComboBox, QSpinBox, QCheckBox, QPushButton,
+import sys
+import os
+import tempfile
+import requests
+from typing import Optional, Any
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
+                             QLabel, QComboBox, QSpinBox, QCheckBox, QPushButton, QLineEdit,
                              QDialogButtonBox, QFontComboBox, QSplitter, QFormLayout,
-                             QListWidget, QListWidgetItem, QLineEdit, QMessageBox, QRadioButton, QFrame, QGroupBox)
+                             QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QFileDialog,
+                             QTreeWidget, QTreeWidgetItem, QHeaderView)
 from PyQt6.QtGui import QFont, QDesktopServices
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QUrl
 
+if sys.platform == "win32":
+    import winshell
+
+import qtawesome as qta
 from utils.logger import log
-from app_core.settings_manager import settings_manager
+from app_core.settings_manager import settings_manager, DEFAULT_SETTINGS
 from app_core.theme_manager import theme_manager
 from app_core.github_manager import GitHubManager
 from app_core.source_control_manager import SourceControlManager
+from app_core.plugin_manager import PluginManager
 from .theme_editor_dialog import ThemeEditorDialog
+
+DEFAULT_SETTINGS["nsis_path"] = ""
+
+
+def get_startup_shortcut_path() -> Optional[str]:
+    if sys.platform != "win32": return None
+    try:
+        return os.path.join(winshell.startup(), "PuffinPyTray.lnk")
+    except Exception as e:
+        log.error(f"Could not get startup folder path: {e}"); return None
 
 
 class AuthDialog(QDialog):
-    """A simple dialog to show the GitHub device code."""
-
-    def __init__(self, user_code, verification_uri, parent=None):
+    def __init__(self, user_code: str, verification_uri: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle("GitHub Device Authorization")
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Please authorize PuffinPyEditor in your browser."))
-
-        url_label = QLabel(f"1. Open: <b><a href='{verification_uri}'>{verification_uri}</a></b>")
+        url_label = QLabel(f"1. Open: <a href='{verification_uri}'>{verification_uri}</a>")
         url_label.setOpenExternalLinks(True)
         layout.addWidget(url_label)
-
         layout.addWidget(QLabel("2. Enter this one-time code:"))
-
-        code_label = QLineEdit(user_code)
+        code_label = QLineEdit(user_code);
         code_label.setReadOnly(True)
         code_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = QFont("Consolas", 14, QFont.Weight.Bold)
-        code_label.setFont(font)
+        code_label.setFont(QFont("Consolas", 14, QFont.Weight.Bold))
         layout.addWidget(code_label)
-
         QDesktopServices.openUrl(QUrl(verification_uri))
         self.setFixedSize(self.sizeHint())
 
@@ -44,269 +58,533 @@ class AuthDialog(QDialog):
 class PreferencesDialog(QDialog):
     settings_changed_for_editor_refresh = pyqtSignal()
     theme_changed_signal = pyqtSignal(str)
-    restart_requested = pyqtSignal()
 
-    def __init__(self, git_manager: SourceControlManager, github_manager: GitHubManager, parent=None):
+    def __init__(self, git_manager: SourceControlManager, github_manager: GitHubManager,
+                 plugin_manager: PluginManager, parent: Optional[QWidget] = None):
         super().__init__(parent)
         log.info("PreferencesDialog initializing...")
         self.setWindowTitle("Preferences")
-        self.setMinimumSize(QSize(700, 500))
-
-        self.git_manager = git_manager
-        self.github_manager = github_manager
-        self.original_settings = {}
-        self.original_git_config = {}
-        self.theme_editor_dialog_instance = None
-        self.staged_repos = []
-        self.staged_active_repo_id = None
-        self.current_repo_id_in_form = None
-        self.auth_dialog = None
-
-        self.main_layout = QVBoxLayout(self)
-        self.tab_widget = QTabWidget()
+        self.setMinimumSize(QSize(750, 650))
+        self.git_manager, self.github_manager, self.plugin_manager = git_manager, github_manager, plugin_manager
+        self.original_settings: dict[str, Any] = {};
+        self.original_git_config: dict[str, str] = {}
+        self.staged_repos: list[dict] = [];
+        self.staged_active_repo_id: Optional[str] = None
+        self.current_repo_id_in_form: Optional[str] = None;
+        self.auth_dialog: Optional[AuthDialog] = None
+        self.theme_editor_dialog_instance: Optional[ThemeEditorDialog] = None;
+        self.restart_needed = False
+        self.main_layout = QVBoxLayout(self);
+        self.tab_widget = QTabWidget();
         self.main_layout.addWidget(self.tab_widget)
+        self._create_tabs();
+        self._create_button_box();
+        self._connect_global_signals()
+        log.info("PreferencesDialog initialized.")
 
-        self._create_appearance_tab()
-        self._create_editor_tab()
-        self._create_source_control_tab()
+    def _create_tabs(self):
+        self._create_appearance_tab();
+        self._create_editor_tab();
+        self._create_run_tab()
+        self._create_system_tab();
+        self._create_source_control_tab();
+        self._create_plugins_tab()
 
+    def _create_button_box(self):
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Apply)
         self.main_layout.addWidget(self.button_box)
+
+    def _connect_global_signals(self):
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
         self.button_box.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(self.apply_settings)
-
-        # Connect signals
         self.git_manager.git_config_ready.connect(self._populate_git_config_fields)
-        self.github_manager.device_code_ready.connect(self.on_device_code_ready)
-        self.github_manager.auth_successful.connect(self.on_auth_successful)
-        self.github_manager.auth_failed.connect(self.on_auth_failed)
-        self.github_manager.auth_polling_lapsed.connect(self.on_auth_polling_lapsed)
+        self.github_manager.device_code_ready.connect(self._on_device_code_ready)
+        self.github_manager.auth_successful.connect(self._on_auth_successful)
+        self.github_manager.auth_failed.connect(self._on_auth_failed)
+        self.github_manager.auth_polling_lapsed.connect(self._on_auth_polling_lapsed)
+        self.github_manager.operation_success.connect(self._handle_github_op_success)
+        self.github_manager.plugin_index_ready.connect(self._on_plugin_index_ready)
+        self.git_manager.git_success.connect(self._handle_git_success)
 
-        log.info("PreferencesDialog initialized.")
+    def _handle_github_op_success(self, message, data):
+        if "Repository" in message and "created" in message:
+            new_repo_id = str(uuid.uuid4())
+            owner, repo_name = self.git_manager.parse_git_url(data.get("clone_url"))
+            new_repo = {
+                "id": new_repo_id,
+                "name": data.get("name"),
+                "owner": owner,
+                "repo": repo_name
+            }
+            self.staged_repos.append(new_repo)
+            QMessageBox.information(self, "Success", f"Repository '{repo_name}' created on GitHub.")
+            self._populate_repo_list(select_repo_id=new_repo_id)
+            self._on_ui_setting_changed()
 
     def showEvent(self, event):
-        self.load_settings_into_dialog()
-        self.git_manager.get_git_config()
+        self._load_settings_into_dialog();
+        self.git_manager.get_git_config();
         self._update_auth_status()
+        self._populate_installed_plugins_list();
+        self.button_box.button(QDialogButtonBox.StandardButton.Apply).setEnabled(False)
+        self.restart_needed = False;
         super().showEvent(event)
 
-    def load_settings_into_dialog(self):
+    def _load_settings_into_dialog(self):
         self.original_settings = settings_manager.settings.copy()
-        self.staged_repos = [r.copy() for r in settings_manager.get("source_control_repos", [])]
-        self.staged_active_repo_id = settings_manager.get("active_update_repo_id")
-
-        self._populate_repo_list()
-        self._repopulate_theme_combo()
+        self._repopulate_theme_combo();
         self.font_family_combo.setCurrentFont(QFont(settings_manager.get("font_family")))
         self.font_size_spinbox.setValue(settings_manager.get("font_size"))
         self.show_line_numbers_checkbox.setChecked(settings_manager.get("show_line_numbers"))
         self.word_wrap_checkbox.setChecked(settings_manager.get("word_wrap"))
-
-        self.button_box.button(QDialogButtonBox.StandardButton.Apply).setEnabled(False)
+        self.show_indent_guides_checkbox.setChecked(settings_manager.get("show_indentation_guides"))
+        self.indent_style_combo.setCurrentText(settings_manager.get("indent_style").capitalize())
+        self.indent_width_spinbox.setValue(settings_manager.get("indent_width"))
+        self.auto_save_checkbox.setChecked(settings_manager.get("auto_save_enabled"))
+        self.auto_save_delay_spinbox.setValue(settings_manager.get("auto_save_delay_seconds"))
+        self.max_recent_files_spinbox.setValue(settings_manager.get("max_recent_files"))
+        self.python_path_edit.setText(settings_manager.get("python_interpreter_path", sys.executable))
+        self.run_in_background_checkbox.setChecked(settings_manager.get("run_in_background", False))
+        self.nsis_path_edit.setText(settings_manager.get("nsis_path", ""))
+        self.cleanup_build_checkbox.setChecked(settings_manager.get("cleanup_after_build", True))
+        self.staged_repos = [r.copy() for r in settings_manager.get("source_control_repos", [])]
+        self.staged_active_repo_id = settings_manager.get("active_update_repo_id");
+        self._populate_repo_list()
+        self.plugins_repo_edit.setText(settings_manager.get("plugins_distro_repo", "Stelliro/puffin-plugins"))
         self._connect_ui_changed_signals()
 
-    def _populate_git_config_fields(self, name, email):
-        log.debug(f"Populating Git config fields with Name: '{name}', Email: '{email}'")
-        self.original_git_config = {'name': name, 'email': email}
-        self.git_user_name_edit.setText(name)
-        self.git_user_email_edit.setText(email)
-        # Connect signals after populating to avoid premature flag setting
-        self.git_user_name_edit.textChanged.connect(self._on_ui_setting_changed)
-        self.git_user_email_edit.textChanged.connect(self._on_ui_setting_changed)
+    def _connect_ui_changed_signals(self):
+        widgets_to_connect = self.findChildren((QComboBox, QSpinBox, QCheckBox, QFontComboBox, QLineEdit))
+        for widget in widgets_to_connect:
+            if isinstance(widget, QComboBox):
+                widget.currentIndexChanged.connect(self._on_ui_setting_changed)
+            elif isinstance(widget, QFontComboBox):
+                widget.currentFontChanged.connect(self._on_ui_setting_changed)
+            elif isinstance(widget, QSpinBox):
+                widget.valueChanged.connect(self._on_ui_setting_changed)
+            elif isinstance(widget, QCheckBox):
+                widget.stateChanged.connect(self._on_ui_setting_changed)
+            elif isinstance(widget, QLineEdit):
+                widget.textChanged.connect(self._on_ui_setting_changed)
+
+    def _on_ui_setting_changed(self, *args):
+        self.button_box.button(QDialogButtonBox.StandardButton.Apply).setEnabled(True)
+
+    def apply_settings(self):
+        if not self.button_box.button(QDialogButtonBox.StandardButton.Apply).isEnabled(): return
+        if sys.platform == "win32" and self.run_in_background_checkbox.isChecked() != self.original_settings.get(
+                "run_in_background", False):
+            self._manage_startup_shortcut(self.run_in_background_checkbox.isChecked())
+        new_name, new_email = self.git_user_name_edit.text().strip(), self.git_user_email_edit.text().strip()
+        if new_name != self.original_git_config.get('name') or new_email != self.original_git_config.get('email'):
+            self.git_manager.set_git_config(new_name, new_email);
+            self.original_git_config = {'name': new_name, 'email': new_email}
+        self._save_repo_form_to_staged()
+        settings_manager.set("last_theme_id", self.theme_combo.currentData(), False)
+        settings_manager.set("font_family", self.font_family_combo.currentFont().family(), False)
+        settings_manager.set("font_size", self.font_size_spinbox.value(), False)
+        settings_manager.set("show_line_numbers", self.show_line_numbers_checkbox.isChecked(), False)
+        settings_manager.set("word_wrap", self.word_wrap_checkbox.isChecked(), False)
+        settings_manager.set("show_indentation_guides", self.show_indent_guides_checkbox.isChecked(), False)
+        settings_manager.set("indent_style", self.indent_style_combo.currentText().lower(), False)
+        settings_manager.set("indent_width", self.indent_width_spinbox.value(), False)
+        settings_manager.set("auto_save_enabled", self.auto_save_checkbox.isChecked(), False)
+        settings_manager.set("auto_save_delay_seconds", self.auto_save_delay_spinbox.value(), False)
+        settings_manager.set("max_recent_files", self.max_recent_files_spinbox.value(), False)
+        settings_manager.set("python_interpreter_path", self.python_path_edit.text().strip(), False)
+        settings_manager.set("run_in_background", self.run_in_background_checkbox.isChecked(), False)
+        settings_manager.set("nsis_path", self.nsis_path_edit.text().strip(), False)
+        settings_manager.set("cleanup_after_build", self.cleanup_build_checkbox.isChecked(), False)
+        settings_manager.set("source_control_repos", self.staged_repos, False)
+        settings_manager.set("active_update_repo_id", self.staged_active_repo_id, False)
+        settings_manager.set("plugins_distro_repo", self.plugins_repo_edit.text().strip(), False)
+        settings_manager.save()
+        self.theme_changed_signal.emit(self.theme_combo.currentData());
+        self.settings_changed_for_editor_refresh.emit()
+        self.original_settings = settings_manager.settings.copy()
+        self.button_box.button(QDialogButtonBox.StandardButton.Apply).setEnabled(False)
+        if self.restart_needed:
+            QMessageBox.information(self, "Restart Required",
+                                    "Some changes require a restart of the application to take effect.")
+            self.restart_needed = False
+        log.info("Applied settings from Preferences dialog.")
+
+    def accept(self):
+        if self.button_box.button(QDialogButtonBox.StandardButton.Apply).isEnabled(): self.apply_settings()
+        super().accept()
+
+    def reject(self):
+        if self.auth_dialog and self.auth_dialog.isVisible(): self.auth_dialog.reject()
+        if self.button_box.button(QDialogButtonBox.StandardButton.Apply).isEnabled():
+            if QMessageBox.question(self, "Unsaved Changes", "Discard unsaved changes?",
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                    QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No: return
+        if self.theme_combo.currentData() != self.original_settings.get("last_theme_id"):
+            self.theme_changed_signal.emit(self.original_settings.get("last_theme_id"))
+        super().reject()
+
+    def _create_appearance_tab(self):
+        tab, layout = QWidget(), QFormLayout();
+        tab.setLayout(layout);
+        layout.setContentsMargins(10, 10, 10, 10)
+        self.theme_combo = QComboBox();
+        self.edit_themes_button = QPushButton("Customize Themes...")
+        self.edit_themes_button.clicked.connect(self._open_theme_editor_dialog)
+        self.font_family_combo = QFontComboBox();
+        self.font_size_spinbox = QSpinBox();
+        self.font_size_spinbox.setRange(6, 72)
+        layout.addRow("Theme:", self.theme_combo);
+        layout.addRow("", self.edit_themes_button);
+        layout.addRow(QLabel())
+        layout.addRow("Editor Font Family:", self.font_family_combo);
+        layout.addRow("Editor Font Size:", self.font_size_spinbox)
+        self.tab_widget.addTab(tab, "Appearance")
+
+    def _repopulate_theme_combo(self):
+        current_id = settings_manager.get("last_theme_id");
+        self.theme_combo.blockSignals(True);
+        self.theme_combo.clear()
+        for theme_id, name in theme_manager.get_available_themes_for_ui().items():
+            self.theme_combo.addItem(name, theme_id)
+        if (index := self.theme_combo.findData(current_id)) != -1: self.theme_combo.setCurrentIndex(index)
+        self.theme_combo.blockSignals(False)
+
+    def _open_theme_editor_dialog(self):
+        if not self.theme_editor_dialog_instance:
+            self.theme_editor_dialog_instance = ThemeEditorDialog(self)
+            self.theme_editor_dialog_instance.custom_themes_changed.connect(self._repopulate_theme_combo)
+        self.theme_editor_dialog_instance.exec()
+
+    def _create_editor_tab(self):
+        tab, layout = QWidget(), QFormLayout();
+        tab.setLayout(layout);
+        layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        layout.addRow(QLabel("<b>Display</b>"));
+        self.show_line_numbers_checkbox = QCheckBox("Show line numbers")
+        self.word_wrap_checkbox = QCheckBox("Enable word wrap");
+        self.show_indent_guides_checkbox = QCheckBox("Show indentation guides")
+        layout.addRow(self.show_line_numbers_checkbox);
+        layout.addRow(self.word_wrap_checkbox);
+        layout.addRow(self.show_indent_guides_checkbox)
+        layout.addRow(QLabel());
+        layout.addRow(QLabel("<b>Indentation</b>"));
+        self.indent_style_combo = QComboBox()
+        self.indent_style_combo.addItems(["Spaces", "Tabs"]);
+        self.indent_width_spinbox = QSpinBox();
+        self.indent_width_spinbox.setRange(1, 16)
+        layout.addRow("Indent Using:", self.indent_style_combo);
+        layout.addRow("Indent/Tab Width:", self.indent_width_spinbox)
+        layout.addRow(QLabel());
+        layout.addRow(QLabel("<b>File Handling</b>"));
+        self.auto_save_checkbox = QCheckBox("Enable auto-save")
+        self.auto_save_delay_spinbox = QSpinBox();
+        self.auto_save_delay_spinbox.setRange(1, 60);
+        self.auto_save_delay_spinbox.setSuffix(" seconds")
+        self.max_recent_files_spinbox = QSpinBox();
+        self.max_recent_files_spinbox.setRange(1, 50)
+        layout.addRow(self.auto_save_checkbox);
+        layout.addRow("Auto-Save Delay:", self.auto_save_delay_spinbox);
+        layout.addRow("Max Recent Files:", self.max_recent_files_spinbox)
+        self.tab_widget.addTab(tab, "Editor")
+
+    def _create_run_tab(self):
+        tab, layout = QWidget(), QFormLayout();
+        tab.setLayout(layout);
+        layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        layout.addRow(QLabel("<b>Execution Environment</b>"));
+        path_layout = QHBoxLayout();
+        self.python_path_edit = QLineEdit()
+        browse_button = QPushButton("Browse...");
+        browse_button.clicked.connect(self._browse_for_python);
+        path_layout.addWidget(self.python_path_edit, 1);
+        path_layout.addWidget(browse_button)
+        layout.addRow("Python Interpreter Path:", path_layout);
+        info = QLabel("This interpreter is used for running scripts (F5) and code analysis.")
+        info.setWordWrap(True);
+        info.setStyleSheet("font-size: 9pt; color: grey;");
+        layout.addRow(info);
+        self.tab_widget.addTab(tab, "Run")
+
+    def _browse_for_python(self):
+        filter_str = "Executables (*.exe)" if sys.platform == "win32" else "All Files (*)"
+        path, _ = QFileDialog.getOpenFileName(self, "Select Python Interpreter", "", filter_str)
+        if path: self.python_path_edit.setText(path)
+
+    def _create_system_tab(self):
+        tab, layout = QWidget(), QFormLayout();
+        tab.setLayout(layout);
+        layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        layout.addRow(QLabel("<b>System Integration</b>"));
+        self.run_in_background_checkbox = QCheckBox("Launch at startup and run in background")
+        if sys.platform != "win32": self.run_in_background_checkbox.setEnabled(
+            False); self.run_in_background_checkbox.setToolTip("This feature is only available on Windows.")
+        info = QLabel("Adds a tray icon that starts with Windows, allowing PuffinPyEditor to open faster.");
+        info.setWordWrap(True);
+        info.setStyleSheet("font-size: 9pt; color: grey;");
+        layout.addRow(self.run_in_background_checkbox);
+        layout.addRow(info);
+        self.tab_widget.addTab(tab, "System")
+
+    def _manage_startup_shortcut(self, create: bool):
+        shortcut_path = get_startup_shortcut_path()
+        if not shortcut_path: return
+        try:
+            if create:
+                if not getattr(sys, 'frozen', False): QMessageBox.warning(self, "Developer Mode",
+                                                                          "Startup feature only works in a packaged application."); self.run_in_background_checkbox.setChecked(
+                    False); return
+                install_dir = os.path.dirname(sys.executable);
+                target_path = os.path.join(install_dir, "PuffinPyTray.exe")
+                if not os.path.exists(target_path): QMessageBox.warning(self, "File Not Found",
+                                                                        f"Could not find PuffinPyTray.exe in {install_dir}"); self.run_in_background_checkbox.setChecked(
+                    False); return
+                with winshell.shortcut(shortcut_path) as shortcut:
+                    shortcut.path, shortcut.description, shortcut.working_directory = target_path, "PuffinPyEditor Background App", install_dir
+                log.info(f"Created startup shortcut: {shortcut_path}")
+            elif os.path.exists(shortcut_path):
+                os.remove(shortcut_path); log.info(f"Removed startup shortcut: {shortcut_path}")
+        except Exception as e:
+            log.error(f"Failed to manage startup shortcut: {e}"); QMessageBox.critical(self, "Error",
+                                                                                       f"Could not modify startup shortcut.\n{e}"); self.run_in_background_checkbox.setChecked(
+                False)
 
     def _create_source_control_tab(self):
-        tab = QWidget()
-        main_layout = QVBoxLayout(tab)
-
-        global_group_box = QGroupBox("Global Git & GitHub Configuration")
-        global_form_layout = QFormLayout(global_group_box)
-
-        auth_widget = QWidget()
-        auth_layout = QHBoxLayout(auth_widget)
+        tab = QWidget();
+        top_layout = QVBoxLayout(tab)
+        gh_group = QGroupBox("GitHub Account");
+        gh_form_layout = QFormLayout(gh_group);
+        gh_form_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        auth_widget = QWidget();
+        auth_layout = QHBoxLayout(auth_widget);
         auth_layout.setContentsMargins(0, 0, 0, 0)
-        self.auth_status_label = QLabel("Not logged in.")
-        self.auth_button = QPushButton("Login to GitHub")
-        self.logout_button = QPushButton("Logout")
+        self.auth_status_label = QLabel("Not logged in.");
+        self.auth_button = QPushButton("Login to GitHub");
+        self.logout_button = QPushButton("Logout");
         self.logout_button.hide()
-        auth_layout.addWidget(self.auth_status_label, 1)
-        auth_layout.addWidget(self.auth_button)
+        auth_layout.addWidget(self.auth_status_label, 1);
+        auth_layout.addWidget(self.auth_button);
         auth_layout.addWidget(self.logout_button)
-        self.auth_button.clicked.connect(self.github_manager.start_device_flow)
-        self.logout_button.clicked.connect(self._logout_github)
-        global_form_layout.addRow(QLabel("GitHub Account:"), auth_widget)
+        gh_form_layout.addRow("Status:", auth_widget);
+        top_layout.addWidget(gh_group)
+        git_group = QGroupBox("Local Git Configuration");
+        git_form_layout = QFormLayout(git_group)
+        self.git_user_name_edit = QLineEdit();
+        self.git_user_name_edit.setPlaceholderText("Name for commits")
+        self.git_user_email_edit = QLineEdit();
+        self.git_user_email_edit.setPlaceholderText("Email for commits")
+        branch_fix_button = QPushButton("Set Default to 'main' Globally");
+        branch_btn_layout = QHBoxLayout();
+        branch_btn_layout.setContentsMargins(0, 0, 0, 0)
+        branch_btn_layout.addWidget(branch_fix_button);
+        branch_btn_layout.addStretch()
+        git_form_layout.addRow("Author Name:", self.git_user_name_edit);
+        git_form_layout.addRow("Author Email:", self.git_user_email_edit)
 
-        self.git_user_name_edit = QLineEdit()
-        self.git_user_name_edit.setPlaceholderText("Your full name (e.g., Jane Doe)")
-        git_user_name_label = QLabel("Git Author Name (for commits):")
-        git_user_name_label.setToolTip("Sets 'user.name' in your Git configuration.\nThis is NOT your GitHub username.")
-        global_form_layout.addRow(git_user_name_label, self.git_user_name_edit)
+        branch_label = QLabel("Default Branch:");
+        branch_label.setAlignment(Qt.AlignmentFlag.AlignVCenter);
+        git_form_layout.addRow(branch_label, branch_btn_layout);
+        top_layout.addWidget(git_group)
 
-        self.git_user_email_edit = QLineEdit()
-        self.git_user_email_edit.setPlaceholderText("Your email address (e.g., you@example.com)")
-        git_user_email_label = QLabel("Git Author Email (for commits):")
-        git_user_email_label.setToolTip("Sets 'user.email' in your Git configuration.\nThis is NOT your GitHub login email.")
-        global_form_layout.addRow(git_user_email_label, self.git_user_email_edit)
+        build_group = QGroupBox("Build Tools");
+        build_form_layout = QFormLayout(build_group);
+        nsis_path_layout = QHBoxLayout()
+        self.nsis_path_edit = QLineEdit();
+        self.nsis_path_edit.setPlaceholderText("e.g., C:\\Program Files (x86)\\NSIS\\makensis.exe")
+        browse_nsis_button = QPushButton("Browse...");
+        browse_nsis_button.clicked.connect(self._browse_for_nsis)
+        nsis_path_layout.addWidget(self.nsis_path_edit, 1);
+        nsis_path_layout.addWidget(browse_nsis_button)
+        nsis_label = QLabel("NSIS `makensis.exe` Path:");
+        nsis_label.setAlignment(Qt.AlignmentFlag.AlignVCenter);
+        build_form_layout.addRow(nsis_label, nsis_path_layout)
+        self.cleanup_build_checkbox = QCheckBox("Automatically clean up temporary build files")
+        self.cleanup_build_checkbox.setToolTip("Deletes the 'build/' folder after a successful installer creation to save space.")
+        build_form_layout.addRow("", self.cleanup_build_checkbox)
+        top_layout.addWidget(build_group)
 
-        main_layout.addWidget(global_group_box)
-
-        repo_group_box = QGroupBox("Application Update Repository Settings")
-        repo_group_layout = QHBoxLayout(repo_group_box)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        repo_group_layout.addWidget(splitter)
-        main_layout.addWidget(repo_group_box, 1)
-
-        left_pane = QWidget()
-        left_layout = QVBoxLayout(left_pane)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addWidget(QLabel("Configured Repositories:"))
-        self.repo_list_widget = QListWidget()
-        left_layout.addWidget(self.repo_list_widget)
-        repo_button_layout = QHBoxLayout()
-        add_repo_btn = QPushButton("Add")
-        remove_repo_btn = QPushButton("Remove")
-        repo_button_layout.addWidget(add_repo_btn)
-        repo_button_layout.addWidget(remove_repo_btn)
-        left_layout.addLayout(repo_button_layout)
-        splitter.addWidget(left_pane)
-
-        right_pane = QWidget()
-        self.right_pane_layout = QVBoxLayout(right_pane)
-        self.repo_form_widget = QWidget()
-        repo_form_layout = QFormLayout(self.repo_form_widget)
-        self.repo_name_edit = QLineEdit()
-        self.repo_owner_edit = QLineEdit()
-        self.repo_repo_edit = QLineEdit()
-        self.repo_active_radio = QRadioButton("Active for checking updates")
-        repo_form_layout.addRow("Friendly Name:", self.repo_name_edit)
-        repo_form_layout.addRow("Owner (e.g., 'user-name'):", self.repo_owner_edit)
-        repo_form_layout.addRow("Repository (e.g., 'repo-name'):", self.repo_repo_edit)
-        repo_form_layout.addRow(self.repo_active_radio)
-        self.repo_placeholder_label = QLabel("Select a repository to edit, or click 'Add'.")
-        self.repo_placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.right_pane_layout.addWidget(self.repo_placeholder_label)
-        self.right_pane_layout.addWidget(self.repo_form_widget)
+        update_group = QGroupBox("Plugin Distribution & Update Repositories");
+        update_layout = QVBoxLayout(update_group)
+        splitter = QSplitter(Qt.Orientation.Horizontal);
+        update_layout.addWidget(splitter, 1)
+        left_pane, right_pane = self._create_repo_management_widgets();
+        splitter.addWidget(left_pane);
         splitter.addWidget(right_pane)
-        splitter.setSizes([250, 400])
-
-        add_repo_btn.clicked.connect(self._action_add_repo)
-        remove_repo_btn.clicked.connect(self._action_remove_repo)
-        self.repo_list_widget.currentItemChanged.connect(self._on_repo_selection_changed)
-        self.repo_active_radio.toggled.connect(self._on_active_radio_toggled)
-
+        splitter.setSizes([250, 400]);
+        top_layout.addWidget(update_group, 1);
         self.tab_widget.addTab(tab, "Source Control")
+        self.auth_button.clicked.connect(self.github_manager.start_device_flow);
+        self.logout_button.clicked.connect(self._logout_github)
+        branch_fix_button.clicked.connect(self.git_manager.set_default_branch_to_main)
+
+    def _browse_for_nsis(self):
+        # --- FIX: Guide user to select the correct executable ---
+        path, _ = QFileDialog.getOpenFileName(self, "Select makensis.exe (Command-Line Version)", "", "Executable (makensis.exe)")
+        if path: self.nsis_path_edit.setText(path)
+
+    def _create_repo_management_widgets(self) -> tuple[QWidget, QWidget]:
+        left_pane, right_pane = QWidget(), QWidget();
+        left_layout, self.right_pane_layout = QVBoxLayout(left_pane), QVBoxLayout(right_pane)
+        self.repo_list_widget = QListWidget();
+        repo_btn_layout = QHBoxLayout();
+        create_repo_btn = QPushButton("Create on GitHub...")
+        add_repo_btn, remove_repo_btn = QPushButton("Add Existing..."), QPushButton("Remove")
+        repo_btn_layout.addStretch();
+        repo_btn_layout.addWidget(create_repo_btn)
+        repo_btn_layout.addWidget(add_repo_btn);
+        repo_btn_layout.addWidget(remove_repo_btn)
+        left_layout.addWidget(self.repo_list_widget);
+        left_layout.addLayout(repo_btn_layout);
+        self.repo_form_widget = QWidget()
+        repo_form_layout = QFormLayout(self.repo_form_widget);
+        self.repo_name_edit, self.repo_owner_edit, self.repo_repo_edit = QLineEdit(), QLineEdit(), QLineEdit()
+        self.repo_active_checkbox = QCheckBox("Set as Primary (for updates & publishing)");
+        repo_form_layout.addRow("Friendly Name:", self.repo_name_edit)
+        repo_form_layout.addRow("Owner (e.g., 'Stelliro'):", self.repo_owner_edit);
+        repo_form_layout.addRow("Repository (e.g., 'PuffinPyEditor'):", self.repo_repo_edit)
+        repo_form_layout.addRow("", self.repo_active_checkbox);
+        self.repo_placeholder_label = QLabel("\nSelect a repository to edit, or create a new one.")
+        self.repo_placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter);
+        self.repo_placeholder_label.setStyleSheet("color: grey;")
+        self.right_pane_layout.addWidget(self.repo_placeholder_label, 1);
+        self.right_pane_layout.addWidget(self.repo_form_widget)
+        create_repo_btn.clicked.connect(self._action_create_repo)
+        add_repo_btn.clicked.connect(self._action_add_repo);
+        remove_repo_btn.clicked.connect(self._action_remove_repo)
+        self.repo_list_widget.currentItemChanged.connect(self._on_repo_selection_changed);
+        self.repo_active_checkbox.toggled.connect(self._on_active_checkbox_toggled)
+        return left_pane, right_pane
+
+    def _action_create_repo(self):
+        name, ok = QInputDialog.getText(self, "Create New Repository", "Enter a name for the new repository:")
+        if not (ok and name): return
+        description, _ = QInputDialog.getText(self, "Create New Repository", "Description (optional):")
+        is_private = QMessageBox.question(self, "Visibility", "Make this repository private?",
+                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                          QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+        self.github_manager.create_repo(name, description, is_private)
+        QMessageBox.information(self, "In Progress", f"Attempting to create '{name}' on GitHub...")
+
+    def _populate_git_config_fields(self, name: str, email: str):
+        log.debug(f"Populating Git config fields with Name: '{name}', Email: '{email}'");
+        self.original_git_config = {'name': name, 'email': email}
+        self.git_user_name_edit.setText(name);
+        self.git_user_email_edit.setText(email)
+
+    def _handle_git_success(self, message: str, data: dict):
+        if "Default branch" in message: QMessageBox.information(self, "Success", message)
 
     def _logout_github(self):
-        self.github_manager.logout()
-        self._update_auth_status()
+        self.github_manager.logout(); self._update_auth_status()
 
     def _update_auth_status(self):
-        user = self.github_manager.get_authenticated_user()
-        if user:
-            self.auth_status_label.setText(f"Logged in as: <b>{user}</b>")
-            self.auth_button.hide()
-            self.logout_button.show()
-        else:
-            self.auth_status_label.setText("Not logged in.")
-            self.auth_button.show()
-            self.logout_button.hide()
+        user = self.github_manager.get_authenticated_user();
+        is_logged_in = bool(user)
+        self.auth_status_label.setText(f"Logged in as: <b>{user}</b>" if is_logged_in else "Not logged in.")
+        self.auth_button.setVisible(not is_logged_in);
+        self.logout_button.setVisible(is_logged_in)
 
-    def on_device_code_ready(self, data):
-        self.auth_dialog = AuthDialog(data['user_code'], data['verification_uri'], self)
+    def _on_device_code_ready(self, data: dict):
+        self.auth_dialog = AuthDialog(data['user_code'], data['verification_uri'], self);
         self.auth_dialog.show()
         self.github_manager.poll_for_token(data['device_code'], data['interval'], data['expires_in'])
 
-    def on_auth_successful(self, username):
-        if self.auth_dialog:
-            self.auth_dialog.accept()
+    def _on_auth_successful(self, username: str):
+        if self.auth_dialog: self.auth_dialog.accept()
         QMessageBox.information(self, "Success", f"Successfully logged in as {username}.")
         self._update_auth_status()
+        if not self.git_user_name_edit.text():
+            self.git_user_name_edit.setText(username)
+        if not self.git_user_email_edit.text():
+            self.git_user_email_edit.setPlaceholderText(f"e.g., {username}@users.noreply.github.com")
 
-    def on_auth_failed(self, error_message):
-        if self.auth_dialog:
-            self.auth_dialog.reject()
-        QMessageBox.critical(self, "Authentication Failed", error_message)
+    def _on_auth_failed(self, error_message: str):
+        if self.auth_dialog: self.auth_dialog.reject()
+        QMessageBox.critical(self, "Authentication Failed", error_message);
         self._update_auth_status()
 
-    def on_auth_polling_lapsed(self):
-        if self.auth_dialog:
-            self.auth_dialog.reject()
-        QMessageBox.warning(self, "Login Expired", "The login code has expired. Please try again.")
+    def _on_auth_polling_lapsed(self):
+        if self.auth_dialog: self.auth_dialog.reject()
+        QMessageBox.warning(self, "Login Expired", "The login code has expired. Please try again.");
         self._update_auth_status()
 
-    def _on_repo_selection_changed(self, current_item, previous_item):
-        if previous_item:
-            self._save_form_to_staged()
-        if not current_item:
-            self._clear_repo_form()
-            return
-        self._load_staged_to_form(current_item.data(Qt.ItemDataRole.UserRole))
+    def _on_repo_selection_changed(self, current_item: Optional[QListWidgetItem],
+                                   previous_item: Optional[QListWidgetItem]):
+        if previous_item: self._save_repo_form_to_staged()
+        if not current_item: self._clear_repo_form(); return
+        self._load_staged_to_repo_form(current_item.data(Qt.ItemDataRole.UserRole))
 
-    def _on_active_radio_toggled(self, checked):
-        if checked and self.current_repo_id_in_form:
-            self.staged_active_repo_id = self.current_repo_id_in_form
-            self._on_ui_setting_changed()
+    def _on_active_checkbox_toggled(self, checked: bool):
+        if not self.current_repo_id_in_form: return
+        self.staged_active_repo_id = self.current_repo_id_in_form if checked else None
+        self._populate_repo_list(select_repo_id=self.current_repo_id_in_form);
+        self._on_ui_setting_changed()
 
-    def _save_form_to_staged(self):
-        if not self.current_repo_id_in_form:
-            return
-        repo_to_update = next((r for r in self.staged_repos if r.get("id") == self.current_repo_id_in_form), None)
-        if repo_to_update:
-            repo_to_update['name'] = self.repo_name_edit.text().strip()
-            repo_to_update['owner'] = self.repo_owner_edit.text().strip()
-            repo_to_update['repo'] = self.repo_repo_edit.text().strip()
+    def _save_repo_form_to_staged(self):
+        if not self.current_repo_id_in_form: return
+        repo = next((r for r in self.staged_repos if r.get("id") == self.current_repo_id_in_form), None)
+        if repo: repo.update({'name': self.repo_name_edit.text().strip(), 'owner': self.repo_owner_edit.text().strip(),
+                              'repo': self.repo_repo_edit.text().strip()})
 
-    def _load_staged_to_form(self, repo_id):
+    def _load_staged_to_repo_form(self, repo_id: str):
         repo_data = next((r for r in self.staged_repos if r.get("id") == repo_id), None)
-        if not repo_data:
-            self._clear_repo_form()
-            return
+        if not repo_data: self._clear_repo_form(); return
         self.current_repo_id_in_form = repo_id
-        for w in [self.repo_name_edit, self.repo_owner_edit, self.repo_repo_edit, self.repo_active_radio]:
-            w.blockSignals(True)
-        self.repo_name_edit.setText(repo_data.get("name", ""))
+        for w in [self.repo_name_edit, self.repo_owner_edit, self.repo_repo_edit,
+                  self.repo_active_checkbox]: w.blockSignals(True)
+        self.repo_name_edit.setText(repo_data.get("name", ""));
         self.repo_owner_edit.setText(repo_data.get("owner", ""))
-        self.repo_repo_edit.setText(repo_data.get("repo", ""))
-        self.repo_active_radio.setChecked(self.staged_active_repo_id == repo_id)
-        self.repo_placeholder_label.hide()
+        self.repo_repo_edit.setText(repo_data.get("repo", ""));
+        self.repo_active_checkbox.setChecked(self.staged_active_repo_id == repo_id)
+        for w in [self.repo_name_edit, self.repo_owner_edit, self.repo_repo_edit,
+                  self.repo_active_checkbox]: w.blockSignals(False)
+        self.repo_placeholder_label.hide();
         self.repo_form_widget.show()
-        for w in [self.repo_name_edit, self.repo_owner_edit, self.repo_repo_edit, self.repo_active_radio]:
-            w.blockSignals(False)
 
     def _action_add_repo(self):
-        self._save_form_to_staged()
+        self._save_repo_form_to_staged();
         new_id = str(uuid.uuid4())
-        new_repo = {"id": new_id, "name": "New Repository"}
-        self.staged_repos.append(new_repo)
-        self._populate_repo_list(select_repo_id=new_id)
-        self.repo_name_edit.setFocus()
-        self.repo_name_edit.selectAll()
+        self.staged_repos.append({"id": new_id, "name": "New Repository", "owner": "", "repo": ""})
+        self._populate_repo_list(select_repo_id=new_id);
+        self.repo_name_edit.setFocus();
+        self.repo_name_edit.selectAll();
         self._on_ui_setting_changed()
 
     def _action_remove_repo(self):
         current_item = self.repo_list_widget.currentItem()
-        if not current_item:
-            return
+        if not current_item: return
         repo_id = current_item.data(Qt.ItemDataRole.UserRole)
-        reply = QMessageBox.question(self, "Confirm Delete", f"Remove '{current_item.text()}'?")
-        if reply == QMessageBox.StandardButton.Yes:
+        repo = next((r for r in self.staged_repos if r.get("id") == repo_id), None)
+        repo_name = f"'{repo.get('owner')}/{repo.get('repo')}'" if repo else f"'{current_item.text()}'"
+
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle("Confirm Remove")
+        msg_box.setTextFormat(Qt.TextFormat.RichText)
+        msg_box.setText(f"Are you sure you want to remove the repository {repo_name} "
+                        "from PuffinPyEditor's list?")
+        msg_box.setInformativeText("<b>This will NOT delete the repository from GitHub.</b> "
+                                   "It only removes it from this application's configuration.")
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        msg_box.setDefaultButton(QMessageBox.StandardButton.Cancel)
+
+        if msg_box.exec() == QMessageBox.StandardButton.Yes:
             self.staged_repos = [r for r in self.staged_repos if r.get("id") != repo_id]
-            if self.staged_active_repo_id == repo_id:
-                self.staged_active_repo_id = None
-            self._populate_repo_list()
+            if self.staged_active_repo_id == repo_id: self.staged_active_repo_id = None
+            self._populate_repo_list();
             self._on_ui_setting_changed()
 
-    def _populate_repo_list(self, select_repo_id=None):
-        self.repo_list_widget.blockSignals(True)
-        self.repo_list_widget.clear()
+    def _populate_repo_list(self, select_repo_id: Optional[str] = None):
+        self.repo_list_widget.blockSignals(True);
+        self.repo_list_widget.clear();
         item_to_select = None
         for repo in sorted(self.staged_repos, key=lambda r: r.get('name', '').lower()):
-            item = QListWidgetItem(repo.get("name"))
+            item = QListWidgetItem(repo.get("name"));
             item.setData(Qt.ItemDataRole.UserRole, repo.get("id"))
+            if repo.get("id") == self.staged_active_repo_id: item.setIcon(qta.icon('fa5s.star', color='gold'))
             self.repo_list_widget.addItem(item)
-            if repo.get("id") == select_repo_id:
-                item_to_select = item
+            if repo.get("id") == select_repo_id: item_to_select = item
         self.repo_list_widget.blockSignals(False)
         if item_to_select:
             self.repo_list_widget.setCurrentItem(item_to_select)
@@ -315,132 +593,120 @@ class PreferencesDialog(QDialog):
 
     def _clear_repo_form(self):
         self.current_repo_id_in_form = None
-        for w in [self.repo_name_edit, self.repo_owner_edit, self.repo_repo_edit]:
-            w.clear()
-        self.repo_active_radio.setAutoExclusive(False)
-        self.repo_active_radio.setChecked(False)
-        self.repo_active_radio.setAutoExclusive(True)
-        self.repo_placeholder_label.show()
+        for w in [self.repo_name_edit, self.repo_owner_edit, self.repo_repo_edit]: w.clear()
+        self.repo_active_checkbox.setChecked(False);
+        self.repo_placeholder_label.show();
         self.repo_form_widget.hide()
 
-    def apply_settings(self):
-        if not self.button_box.button(QDialogButtonBox.StandardButton.Apply).isEnabled():
-            return
-
-        new_name = self.git_user_name_edit.text().strip()
-        new_email = self.git_user_email_edit.text().strip()
-        if new_name != self.original_git_config.get('name') or new_email != self.original_git_config.get('email'):
-            self.git_manager.set_git_config(new_name, new_email)
-            self.original_git_config = {'name': new_name, 'email': new_email}
-
-        self._save_form_to_staged()
-
-        new_theme_id = self.theme_combo.currentData()
-        if self.original_settings.get("last_theme_id") != new_theme_id:
-            self.theme_changed_signal.emit(new_theme_id)
-
-        settings_manager.set("last_theme_id", new_theme_id, False)
-        settings_manager.set("font_family", self.font_family_combo.currentFont().family(), False)
-        settings_manager.set("font_size", self.font_size_spinbox.value(), False)
-        settings_manager.set("show_line_numbers", self.show_line_numbers_checkbox.isChecked(), False)
-        settings_manager.set("word_wrap", self.word_wrap_checkbox.isChecked(), False)
-        settings_manager.set("source_control_repos", self.staged_repos, False)
-        settings_manager.set("active_update_repo_id", self.staged_active_repo_id, False)
-
-        settings_manager.save()
-        self.settings_changed_for_editor_refresh.emit()
-        self.original_settings = settings_manager.settings.copy()
-        self.button_box.button(QDialogButtonBox.StandardButton.Apply).setEnabled(False)
-        log.info("Applied settings from Preferences dialog.")
-
-    def accept(self):
-        if self.button_box.button(QDialogButtonBox.StandardButton.Apply).isEnabled():
-            self.apply_settings()
-        super().accept()
-
-    def reject(self):
-        if self.auth_dialog and self.auth_dialog.isVisible():
-            self.auth_dialog.reject()
-        if self.button_box.button(QDialogButtonBox.StandardButton.Apply).isEnabled():
-            reply = QMessageBox.question(self, "Unsaved Changes", "Discard unsaved changes?",
-                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                         QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.No:
-                return
-        super().reject()
-
-    def _create_appearance_tab(self):
-        tab = QWidget()
-        layout = QGridLayout(tab)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.theme_combo = QComboBox()
-        self.edit_themes_button = QPushButton("Customize Themes...")
-        self.edit_themes_button.clicked.connect(self._open_theme_editor_dialog)
-        self.font_family_combo = QFontComboBox()
-        self.font_size_spinbox = QSpinBox()
-        self.font_size_spinbox.setRange(6, 72)
-        layout.addWidget(QLabel("Active Theme:"), 0, 0)
-        layout.addWidget(self.theme_combo, 0, 1)
-        layout.addWidget(self.edit_themes_button, 1, 1, alignment=Qt.AlignmentFlag.AlignRight)
-        layout.addWidget(QLabel("Font Family:"), 2, 0)
-        layout.addWidget(self.font_family_combo, 2, 1)
-        layout.addWidget(QLabel("Font Size:"), 3, 0)
-        layout.addWidget(self.font_size_spinbox, 3, 1)
-        layout.setColumnStretch(1, 1)
-        self.tab_widget.addTab(tab, "Appearance")
-
-    def _create_editor_tab(self):
-        tab = QWidget()
+    def _create_plugins_tab(self):
+        tab = QWidget();
         layout = QVBoxLayout(tab)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.show_line_numbers_checkbox = QCheckBox("Show Line Numbers")
-        self.word_wrap_checkbox = QCheckBox("Enable Word Wrap")
-        layout.addWidget(self.show_line_numbers_checkbox)
-        layout.addWidget(self.word_wrap_checkbox)
-        layout.addStretch()
-        self.tab_widget.addTab(tab, "Editor")
+        remote_group = QGroupBox("Install New Plugins");
+        remote_layout = QVBoxLayout(remote_group)
+        repo_layout = QHBoxLayout()
+        repo_label = QLabel("Plugin Distro Repo:");
+        repo_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        repo_layout.addWidget(repo_label)
+        self.plugins_repo_edit = QLineEdit()
+        self.plugins_repo_edit.setPlaceholderText("user/repository");
+        self.fetch_plugins_button = QPushButton("Fetch")
+        repo_layout.addWidget(self.plugins_repo_edit, 1);
+        repo_layout.addWidget(self.fetch_plugins_button);
+        remote_layout.addLayout(repo_layout)
+        self.remote_plugins_tree = QTreeWidget();
+        self.remote_plugins_tree.setHeaderLabels(["Plugin", "Description"])
+        self.remote_plugins_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.remote_plugins_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        remote_layout.addWidget(self.remote_plugins_tree);
+        install_file_button = QPushButton("Install from File (.zip)...")
+        install_file_button.setIcon(qta.icon('fa5s.file-archive'));
+        remote_layout.addWidget(install_file_button, 0, Qt.AlignmentFlag.AlignRight)
+        layout.addWidget(remote_group, 1);
+        installed_group = QGroupBox("Installed Plugins");
+        installed_layout = QVBoxLayout(installed_group)
+        self.installed_plugins_list = QListWidget();
+        self.uninstall_plugin_button = QPushButton("Uninstall Selected Plugin")
+        self.uninstall_plugin_button.setIcon(qta.icon('fa5s.trash-alt', color='crimson'));
+        installed_layout.addWidget(self.installed_plugins_list)
+        installed_layout.addWidget(self.uninstall_plugin_button, 0, Qt.AlignmentFlag.AlignRight);
+        layout.addWidget(installed_group, 1)
+        self.tab_widget.addTab(tab, "Plugins");
+        self.fetch_plugins_button.clicked.connect(self._fetch_remote_plugins)
+        install_file_button.clicked.connect(self._install_plugin_from_file);
+        self.uninstall_plugin_button.clicked.connect(self._uninstall_selected_plugin)
 
-    def _connect_ui_changed_signals(self):
-        for widget in self.findChildren((QComboBox, QSpinBox, QCheckBox, QLineEdit)):
-            try:
-                if hasattr(widget, 'currentIndexChanged'):
-                    widget.currentIndexChanged.disconnect()
-                if hasattr(widget, 'valueChanged'):
-                    widget.valueChanged.disconnect()
-                if hasattr(widget, 'stateChanged'):
-                    widget.stateChanged.disconnect()
-                if hasattr(widget, 'textChanged'):
-                    widget.textChanged.disconnect()
-            except TypeError:
-                pass
+    def _populate_installed_plugins_list(self):
+        self.installed_plugins_list.clear();
+        plugins = self.plugin_manager.get_installed_plugins()
+        for plugin in plugins:
+            item_text = f"{plugin.get('name', 'Unknown')} (v{plugin.get('version', 'N/A')})"
+            list_item = QListWidgetItem(item_text);
+            list_item.setToolTip(f"ID: {plugin.get('id')}\n{plugin.get('description')}")
+            list_item.setData(Qt.ItemDataRole.UserRole, plugin.get('id'));
+            self.installed_plugins_list.addItem(list_item)
 
-        for widget in self.findChildren((QComboBox, QSpinBox, QCheckBox)):
-            if hasattr(widget, 'currentIndexChanged'):
-                widget.currentIndexChanged.connect(self._on_ui_setting_changed)
-            elif hasattr(widget, 'valueChanged'):
-                widget.valueChanged.connect(self._on_ui_setting_changed)
-            elif hasattr(widget, 'stateChanged'):
-                widget.stateChanged.connect(self._on_ui_setting_changed)
+    def _fetch_remote_plugins(self):
+        repo_path = self.plugins_repo_edit.text().strip()
+        if not repo_path or '/' not in repo_path: QMessageBox.warning(self, "Invalid Repo",
+                                                                      "Enter a valid GitHub repo (user/repo)."); return
+        self.remote_plugins_tree.clear();
+        QTreeWidgetItem(self.remote_plugins_tree, ["Fetching..."]);
+        self.fetch_plugins_button.setEnabled(False)
+        self.github_manager.fetch_plugin_index(repo_path)
 
-        for widget in [self.repo_name_edit, self.repo_owner_edit, self.repo_repo_edit]:
-            widget.textChanged.connect(self._on_ui_setting_changed)
+    def _on_plugin_index_ready(self, plugin_list: list):
+        self.fetch_plugins_button.setEnabled(True);
+        self.remote_plugins_tree.clear()
+        installed_ids = {p['id'] for p in self.plugin_manager.get_installed_plugins()}
+        for plugin_info in plugin_list:
+            name, desc = plugin_info.get("name", "Unknown"), plugin_info.get("description", "")
+            item = QTreeWidgetItem(self.remote_plugins_tree, [name, desc])
+            if plugin_info.get('id') in installed_ids:
+                item.setText(0, f"{name} (Installed)"); item.setDisabled(True)
+            else:
+                install_button = QPushButton("Install");
+                install_button.clicked.connect(
+                    lambda ch, url=plugin_info.get("download_url"): self._install_plugin_from_url(url))
+                self.remote_plugins_tree.setItemWidget(item, 0, install_button)
 
-    def _on_ui_setting_changed(self, *args):
-        self.button_box.button(QDialogButtonBox.StandardButton.Apply).setEnabled(True)
+    def _install_plugin_from_url(self, url: str):
+        if not url: QMessageBox.critical(self, "Error", "Plugin has no download URL."); return
+        try:
+            response = requests.get(url, stream=True, timeout=30);
+            response.raise_for_status()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_file:
+                for chunk in response.iter_content(8192): tmp_file.write(chunk)
+                temp_zip_path = tmp_file.name
+            success, message = self.plugin_manager.install_plugin_from_zip(temp_zip_path)
+            if success:
+                QMessageBox.information(self, "Success",
+                                        message); self.restart_needed = True; self._populate_installed_plugins_list(); self._fetch_remote_plugins()
+            else:
+                QMessageBox.critical(self, "Installation Failed", message)
+        except requests.RequestException as e:
+            QMessageBox.critical(self, "Download Failed", f"Could not download: {e}")
+        finally:
+            if 'temp_zip_path' in locals() and os.path.exists(temp_zip_path): os.remove(temp_zip_path)
 
-    def _repopulate_theme_combo(self):
-        current_id = settings_manager.get("last_theme_id")
-        self.theme_combo.blockSignals(True)
-        self.theme_combo.clear()
-        for theme_id, name in theme_manager.get_available_themes_for_ui().items():
-            self.theme_combo.addItem(name, theme_id)
-        index = self.theme_combo.findData(current_id)
-        if index != -1:
-            self.theme_combo.setCurrentIndex(index)
-        self.theme_combo.blockSignals(False)
+    def _install_plugin_from_file(self):
+        filepath, _ = QFileDialog.getOpenFileName(self, "Select Plugin Archive", "", "ZIP Files (*.zip)")
+        if not filepath: return
+        success, message = self.plugin_manager.install_plugin_from_zip(filepath)
+        if success:
+            QMessageBox.information(self, "Success",
+                                    message); self.restart_needed = True; self._populate_installed_plugins_list()
+        else:
+            QMessageBox.critical(self, "Uninstall Failed", message)
 
-    def _open_theme_editor_dialog(self):
-        if self.theme_editor_dialog_instance is None:
-            self.theme_editor_dialog_instance = ThemeEditorDialog(self)
-            self.theme_editor_dialog_instance.custom_themes_changed.connect(self._repopulate_theme_combo)
-        self.theme_editor_dialog_instance.exec()
+    def _uninstall_selected_plugin(self):
+        if not (current_item := self.installed_plugins_list.currentItem()): QMessageBox.warning(self, "No Selection",
+                                                                                                "Please select a plugin to uninstall."); return
+        plugin_id = current_item.data(Qt.ItemDataRole.UserRole)
+        if QMessageBox.question(self, "Confirm Uninstall",
+                                f"Uninstall '{current_item.text()}'?") == QMessageBox.StandardButton.Yes:
+            success, message = self.plugin_manager.uninstall_plugin(plugin_id)
+            if success:
+                QMessageBox.information(self, "Success",
+                                        message); self.restart_needed = True; self._populate_installed_plugins_list()
+            else:
+                QMessageBox.critical(self, "Uninstall Failed", message)

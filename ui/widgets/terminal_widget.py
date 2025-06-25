@@ -1,8 +1,9 @@
+# MACK PUFFINPYEDITOR/ui/widgets/terminal_widget.py
 import os
 import sys
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QLineEdit, QHBoxLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QLineEdit, QHBoxLayout
 from PyQt6.QtGui import QFont, QColor
-from PyQt6.QtCore import Qt, QProcess
+from PyQt6.QtCore import QProcess
 
 from utils.logger import log
 
@@ -32,10 +33,9 @@ class TerminalWidget(QWidget):
         input_layout.setContentsMargins(5, 3, 5, 3)
         input_layout.setSpacing(5)
 
-        self.prompt_label = QLabel(self)
         self.input_line = QLineEdit(self)
+        self.input_line.setPlaceholderText("Type command and press Enter...")
 
-        input_layout.addWidget(self.prompt_label)
         input_layout.addWidget(self.input_line, 1)
         self.layout.addWidget(input_container)
 
@@ -53,25 +53,21 @@ class TerminalWidget(QWidget):
         font = QFont("Consolas", 10)
         self.output_area.setFont(font)
         self.input_line.setFont(font)
-        self.prompt_label.setFont(font)
         self.output_area.setStyleSheet("background-color: black; color: #E0E0E0; border: none;")
         self.input_line.setStyleSheet("background-color: black; color: #E0E0E0; border: none;")
 
     def set_working_directory(self, path: str):
         if path and os.path.isdir(path):
             self.current_working_directory = path
-            prompt_text = f"{path}>"
-            self.prompt_label.setText(prompt_text)
-            self.prompt_label.setToolTip(path)
         else:
             self.current_working_directory = os.path.expanduser("~")
-            self.prompt_label.setText(f"{self.current_working_directory}>")
 
         log.info(f"Terminal working directory set to: {self.current_working_directory}")
 
     def start_process(self):
         if self.process.state() == QProcess.ProcessState.Running:
             return
+        self.output_area.clear()
         self.process.setWorkingDirectory(self.current_working_directory)
         self.process.start(self.shell_path)
         if not self.process.waitForStarted():
@@ -80,11 +76,25 @@ class TerminalWidget(QWidget):
             return
         log.info(f"Terminal process started (PID: {self.process.processId()}).")
 
+    def restart_process(self):
+        """Kills the current process and starts a new one."""
+        log.info("Restarting terminal process...")
+        self.kill_process()
+        self.start_process()
+
     def _on_command_entered(self):
-        command = self.input_line.text() + "\n"
+        command = self.input_line.text().strip()
         self.input_line.clear()
+        self.execute_command(command)
+
+    def execute_command(self, command: str):
+        """Public method to send a command to the running terminal process."""
+        if not command:
+            return
+
+        command_to_write = command + "\n"
         if self.process.state() == QProcess.ProcessState.Running:
-            self.process.write(command.encode('utf-8'))
+            self.process.write(command_to_write.encode('utf-8'))
         else:
             self.append_output("Shell process is not running.", is_error=True)
 
@@ -121,9 +131,8 @@ class TerminalWidget(QWidget):
     def set_font_and_color(self, font: QFont, text_color: QColor, bg_color: QColor):
         self.output_area.setFont(font)
         self.input_line.setFont(font)
-        self.prompt_label.setFont(font)
 
-        container_bg = bg_color.lighter(110).name()
+        container_bg = bg_color.name()
         container_border = bg_color.lighter(120).name()
 
         stylesheet = f"""
@@ -136,10 +145,6 @@ class TerminalWidget(QWidget):
             QWidget#TerminalInputContainer {{
                 background-color: {container_bg};
                 border-top: 1px solid {container_border};
-            }}
-            QLabel {{
-                color: {text_color.name()};
-                background-color: transparent;
             }}
             QLineEdit {{
                 color: {text_color.name()};

@@ -1,0 +1,1 @@
+{ "id": "github_tools", "name": "GitHub Tools", "author": "PuffinPy Team", "version": "1.0.0", "description": "Provides UI for cloning, releases, and other GitHub interactions.", "entry_point": "plugin_main.py" }

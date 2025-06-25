@@ -3,3 +3,6 @@ jedi
 qtawesome
 requests
 GitPython
+winshell
+pywin32
+Markdown

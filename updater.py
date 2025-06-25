@@ -6,10 +6,54 @@ import requests
 import zipfile
 import shutil
 
+# --- Configuration ---
+# A set of files and folders that the updater will NEVER overwrite, even if they
+# exist in the downloaded update. This protects user-specific data.
+# Paths should use forward slashes and be relative to the install directory.
+PROTECTED_ITEMS = {
+    "puffin_editor_settings.json",
+    "logs",
+    "assets/themes/custom_themes.json"
+}
+# --- End Configuration ---
+
 
 def log(message):
     """Simple logger for the updater script."""
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}")
+
+
+def safe_copy(source_dir, install_dir):
+    """
+    Intelligently copies files from the update source to the installation
+    directory, skipping any protected files or folders.
+    """
+    log("Starting safe copy process...")
+    for root, dirs, files in os.walk(source_dir):
+        # Process directories first
+        for d in dirs:
+            src_path = os.path.join(root, d)
+            rel_path = os.path.relpath(src_path, source_dir)
+            # Use forward slashes for cross-platform comparison
+            if rel_path.replace(os.sep, '/') in PROTECTED_ITEMS:
+                log(f"Skipping protected directory: {rel_path}")
+                # Prevent os.walk from going into this directory
+                dirs.remove(d)
+                continue
+            dest_path = os.path.join(install_dir, rel_path)
+            os.makedirs(dest_path, exist_ok=True)
+
+        # Process files
+        for f in files:
+            src_path = os.path.join(root, f)
+            rel_path = os.path.relpath(src_path, source_dir)
+            # Use forward slashes for cross-platform comparison
+            if rel_path.replace(os.sep, '/') in PROTECTED_ITEMS:
+                log(f"Skipping protected file: {rel_path}")
+                continue
+            dest_path = os.path.join(install_dir, rel_path)
+            shutil.copy2(src_path, dest_path)
+    log("Safe copy process finished.")
 
 
 def main():
@@ -46,32 +90,40 @@ def main():
     backup_dir = os.path.join(install_dir, f"PuffinPyEditor_backup_{int(time.time())}")
     log(f"Creating backup at: {backup_dir}")
     try:
+        # Update ignore pattern to also ignore the temp update files
         shutil.copytree(install_dir, backup_dir,
-                        ignore=shutil.ignore_patterns('PuffinPyEditor_backup_*', '*.log', 'venv', '.git*'))
+                        ignore=shutil.ignore_patterns('PuffinPyEditor_backup_*', 'update_temp', '*.zip', '*.log', 'venv', '.git*'))
     except Exception as e:
         log(f"Warning: Could not create full backup. {e}")
 
+    temp_extract_dir = os.path.join(install_dir, "update_temp")
     try:
         log("Unzipping update...")
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            temp_extract_dir = os.path.join(install_dir, "update_temp")
             zip_ref.extractall(temp_extract_dir)
+        
+        # Check if the zip contains a single root folder
         extracted_content = os.listdir(temp_extract_dir)
         source_dir = temp_extract_dir
         if len(extracted_content) == 1:
             possible_root = os.path.join(temp_extract_dir, extracted_content[0])
             if os.path.isdir(possible_root):
+                log(f"Update content is in a single root folder: {extracted_content[0]}")
                 source_dir = possible_root
 
-        log(f"Replacing files in '{install_dir}' with content from '{source_dir}'")
-
-        shutil.copytree(source_dir, install_dir, dirs_exist_ok=True)
+        log(f"Replacing files in '{install_dir}' using safe copy method.")
+        
+        # --- THIS IS THE KEY CHANGE ---
+        # Instead of a blind copytree, use our safe copy function.
+        safe_copy(source_dir, install_dir)
+        # --- END OF KEY CHANGE ---
 
         log("Update successfully installed.")
 
     except Exception as e:
         log(f"Error: Failed during installation. {e}")
         log("Attempting to restore from backup...")
+        # (Restore logic could be added here if needed)
         return
 
     finally:

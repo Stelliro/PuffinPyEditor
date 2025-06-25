@@ -1,85 +1,69 @@
 # PuffinPyEditor/app_core/source_control_manager.py
 import os
+import re
 import git
-from git import Repo, GitCommandError, InvalidGitRepositoryError, NoSuchPathError
+from git import Repo, GitCommandError, InvalidGitRepositoryError
+from typing import List, Optional
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from utils.logger import log
-from app_core.settings_manager import settings_manager
 import configparser
 
 
 class GitWorker(QObject):
+    """
+    Worker that runs all GitPython operations in a background thread.
+    """
     summaries_ready = pyqtSignal(dict)
     status_ready = pyqtSignal(list, list, str)
     error_occurred = pyqtSignal(str)
     operation_success = pyqtSignal(str, dict)
     git_config_ready = pyqtSignal(str, str)
 
+    def _get_author(self, repo: Repo) -> Optional[git.Actor]:
+        """Reads git config and returns a git.Actor. Emits error if config is missing."""
+        try:
+            with repo.config_reader() as cr:
+                name = cr.get_value('user', 'name')
+                email = cr.get_value('user', 'email')
+            return git.Actor(name, email)
+        except (configparser.NoSectionError, configparser.NoOptionError):
+            self.error_occurred.emit("Git user config is missing. Please set it in Preferences > Source Control.")
+            return None
+
     def get_git_config(self):
+        """Reads the global Git user configuration."""
         try:
             git_cmd = git.Git()
-            name, email = "", ""
-            try:
-                name = git_cmd.config('--global', '--get', 'user.name')
-            except GitCommandError:
-                log.warning("Git user.name is not set globally.")
-            try:
-                email = git_cmd.config('--global', '--get', 'user.email')
-            except GitCommandError:
-                log.warning("Git user.email is not set globally.")
+            name = git_cmd.config('--global', '--get', 'user.name')
+            email = git_cmd.config('--global', '--get', 'user.email')
             self.git_config_ready.emit(name, email)
-        except Exception as e:
-            log.error(f"Failed to get git config: {e}")
+        except GitCommandError:
+            log.warning("Global Git user.name or user.email is not set.")
             self.git_config_ready.emit("", "")
 
-    def set_git_config(self, name, email):
+    def set_git_config(self, name: str, email: str):
+        """Sets the global Git user configuration."""
         try:
             git_cmd = git.Git()
             if name:
                 git_cmd.config('--global', 'user.name', name)
-                log.info(f"Set global git user.name to '{name}'")
             if email:
                 git_cmd.config('--global', 'user.email', email)
-                log.info(f"Set global git user.email to '{email}'")
             self.operation_success.emit("Global Git config updated.", {})
-        except Exception as e:
+        except GitCommandError as e:
             log.error(f"Failed to set git config: {e}")
             self.error_occurred.emit(f"Failed to set Git config: {e}")
 
-    def link_to_remote(self, local_path, remote_url):
+    def set_default_branch(self):
+        """Sets the global Git config to use 'main' for new repositories."""
         try:
-            log.info(f"Linking local path '{local_path}' to remote '{remote_url}'")
-            repo = Repo.init(local_path)
+            git.Git().config('--global', 'init.defaultBranch', 'main')
+            log.info("Set global init.defaultBranch to 'main'.")
+            self.operation_success.emit("Default branch for new repos is now 'main'.", {})
+        except GitCommandError as e:
+            self.error_occurred.emit(f"Could not set default branch: {e}")
 
-            if 'origin' in repo.remotes:
-                origin = repo.remotes.origin
-                origin.set_url(remote_url)
-            else:
-                origin = repo.create_remote('origin', remote_url)
-
-            origin.fetch()
-            remote_head = repo.remote().refs.HEAD
-
-            if remote_head.is_valid():
-                remote_branch_name = remote_head.reference.name.split('/')[-1]
-                log.info(f"Remote default branch is '{remote_branch_name}'. Aligning local repo.")
-                repo.git.branch('-M', remote_branch_name)
-                repo.git.reset('--soft', f'origin/{remote_branch_name}')
-            else:
-                log.warning("Remote repository is empty.")
-
-            if not repo.head.is_valid():
-                log.info("No local commits found. Staging all files and creating initial commit.")
-                repo.git.add(A=True)
-                repo.index.commit("Initial commit after linking to remote")
-
-            self.operation_success.emit(f"Successfully linked to {remote_url}", {})
-
-        except Exception as e:
-            log.error(f"Failed to link to remote: {e}", exc_info=True)
-            self.error_occurred.emit(f"Failed to link repository: {e}")
-
-    def get_multiple_repo_summaries(self, repo_paths: list):
+    def get_multiple_repo_summaries(self, repo_paths: List[str]):
         summaries = {}
         for path in repo_paths:
             try:
@@ -91,166 +75,178 @@ class GitWorker(QObject):
                 else:
                     summaries[path] = {'branch': repo.active_branch.name, 'commit': repo.head.commit.hexsha[:7]}
             except InvalidGitRepositoryError:
-                log.info(f"'{os.path.basename(path)}' is not a Git repository. Skipping.")
+                pass
             except Exception as e:
-                log.error(f"Unexpected error getting Git summary for {path}: {e}")
+                log.error(f"Error getting Git summary for {path}: {e}")
                 summaries[path] = {'branch': '(error)', 'commit': 'N/A'}
         self.summaries_ready.emit(summaries)
 
-    def create_tag(self, repo_path, tag, title):
-        try:
-            try:
-                repo = Repo(repo_path)
-            except InvalidGitRepositoryError:
-                self.error_occurred.emit(f"Operation failed: '{os.path.basename(repo_path)}' is not a Git repository.")
-                return
-
-            with repo.config_reader() as cr:
-                try:
-                    name = cr.get_value('user', 'name')
-                    email = cr.get_value('user', 'email')
-                    if not name or not email:
-                        raise ValueError("User name or email not configured.")
-                except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
-                    self.error_occurred.emit(
-                        "Git user config is missing.\n\n"
-                        "Please configure your user identity in Preferences > Source Control."
-                    )
-                    return
-
-            # FIX: Check if the repository has any commits. If not, create one.
-            if not repo.head.is_valid():
-                log.info(f"No commits found in '{repo_path}'. Creating initial commit.")
-                if repo.is_dirty(untracked_files=True):
-                    repo.git.add(A=True)
-                    repo.index.commit("Initial commit for release")
-                    log.info("Staged all files and created initial commit.")
-                else:
-                    self.error_occurred.emit("Cannot create a release for an empty project with no files.")
-                    return
-
-            repo.create_tag(tag, message=title)
-            self.operation_success.emit(f"Tag created: {tag}", {})
-
-        except GitCommandError as e:
-            if "already exists" in str(e):
-                self.error_occurred.emit(f"Tag '{tag}' already exists.")
-            else:
-                log.error(f"GitCommandError while tagging: {e}", exc_info=True)
-                self.error_occurred.emit(f"Failed to create tag. Check logs.")
-        except Exception as e:
-            log.error(f"Unexpected error while tagging repository {repo_path}: {e}", exc_info=True)
-            self.error_occurred.emit("An unexpected error occurred while tagging. Check logs.")
-
-    def get_status(self, repo_path):
+    def get_status(self, repo_path: str):
         try:
             repo = Repo(repo_path)
             staged = [item.a_path for item in repo.index.diff('HEAD')]
-            unstaged = [item.a_path for item in repo.index.diff(None)] + repo.untracked_files
-            self.status_ready.emit(staged, unstaged, repo_path)
-        except Exception as e:
-            self.error_occurred.emit(f"Git Status for {os.path.basename(repo_path)} failed: {e}")
+            unstaged = [item.a_path for item in repo.index.diff(None)]
+            untracked = repo.untracked_files
+            self.status_ready.emit(staged, unstaged + untracked, repo_path)
+        except (InvalidGitRepositoryError, ValueError) as e:
+            self.error_occurred.emit(f"Git Status for '{os.path.basename(repo_path)}' failed: {e}")
 
-    def commit_files(self, repo_path, message):
+    def commit_files(self, repo_path: str, message: str):
         try:
             repo = Repo(repo_path)
-            with repo.config_reader() as cr:
-                try:
-                    name = cr.get_value('user', 'name')
-                    email = cr.get_value('user', 'email')
-                    if not name or not email:
-                        raise ValueError("User name or email not configured.")
-                except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
-                    self.error_occurred.emit(
-                        "Git user config is missing.\n\n"
-                        "Please configure your user identity in Preferences > Source Control."
-                    )
-                    return
+            author = self._get_author(repo)
+            if not author:
+                return
 
-            log.info(f"Staging all changes in {repo_path}")
             repo.git.add(A=True)
-
-            if repo.index.diff("HEAD"):
-                repo.index.commit(message)
-                self.operation_success.emit("Changes committed.", {'repo_path': repo_path})
+            if repo.is_dirty(untracked_files=True):
+                repo.index.commit(message, author=author, committer=author)
+                self.operation_success.emit("Changes committed", {'repo_path': repo_path})
             else:
-                self.operation_success.emit("No changes to commit.", {'repo_path': repo_path, 'no_changes': True})
-
-        except Exception as e:
+                self.operation_success.emit("No new changes to commit.", {'repo_path': repo_path, 'no_changes': True})
+        except GitCommandError as e:
             self.error_occurred.emit(f"Git Commit failed: {e}")
 
-    def push(self, repo_path):
+    def push(self, repo_path: str, tag_name: Optional[str] = None):
         try:
             repo = Repo(repo_path)
             origin = repo.remotes.origin
-            active_branch = repo.active_branch.name
-            log.info(f"Pushing branch '{active_branch}' and all tags to remote...")
-            origin.push(refspec=f'{active_branch}:{active_branch}', tags=True)
-            self.operation_success.emit("Push successful", {})
-        except GitCommandError as e:
-            error_str = str(e).lower()
-            if "authentication failed" in error_str:
-                msg = "Authentication failed. Please use the 'Login to GitHub' button in Preferences."
+            if tag_name:
+                log.info(f"Pushing tag '{tag_name}' to remote '{origin.url}'...")
+                origin.push(tag_name)
+                self.operation_success.emit(f"Tag '{tag_name}' pushed successfully", {})
             else:
-                msg = f"Git Push failed: {e}"
+                active_branch = repo.active_branch.name
+                log.info(f"Pushing branch '{active_branch}' to remote '{origin.url}'...")
+                origin.push(refspec=f'{active_branch}:{active_branch}')
+                self.operation_success.emit("Push successful", {})
+        except GitCommandError as e:
+            err_str = str(e).lower()
+            msg = "Authentication failed." if "authentication failed" in err_str else f"Git Push failed: {e}"
             self.error_occurred.emit(msg)
-        except Exception as e:
-            self.error_occurred.emit(f"Git Push failed: An unexpected error occurred: {e}")
 
-    def pull(self, repo_path):
+    def pull(self, repo_path: str):
         try:
             repo = Repo(repo_path)
-            repo.remotes.origin.pull()
+            origin = repo.remotes.origin
+            log.info(f"Pulling from remote '{origin.url}'...")
+            origin.pull()
             self.operation_success.emit("Pull successful", {})
             self.get_status(repo_path)
-        except Exception as e:
+        except GitCommandError as e:
             self.error_occurred.emit(f"Git Pull failed: {e}")
 
-    def clone_repo(self, url, path, branch):
+    def clone_repo(self, url: str, path: str, branch: Optional[str] = None):
         try:
-            log.info(
-                f"Cloning '{url}' (branch: {branch}) into '{os.path.join(path, os.path.basename(url).replace('.git', ''))}'")
-            Repo.clone_from(url, os.path.join(path, os.path.basename(url).replace('.git', '')), branch=branch)
-            self.operation_success.emit("Clone successful", {})
+            target_dir = os.path.join(path, os.path.basename(url).replace('.git', ''))
+            kwargs = {'branch': branch} if branch else {}
+            log_msg = f"Cloning '{url}' (branch: {branch or 'default'}) into '{target_dir}'"
+            log.info(log_msg)
+            Repo.clone_from(url, target_dir, **kwargs)
+            self.operation_success.emit("Clone successful", {"path": target_dir})
         except GitCommandError as e:
-            error_str = str(e).lower()
-            if "authentication failed" in error_str:
-                msg = "Authentication failed. The repository may be private. Please login via Preferences."
+            err_str = str(e).lower()
+            if "not found in upstream origin" in err_str:
+                msg = f"Branch '{branch}' not found in the remote repository."
+            elif "authentication failed" in err_str:
+                msg = "Authentication failed. Repository may be private or URL is incorrect."
             else:
                 msg = f"Clone failed: {e}"
             self.error_occurred.emit(msg)
-        except Exception as e:
-            self.error_occurred.emit(f"Clone failed: An unexpected error occurred: {e}")
 
-    def publish_repo(self, path, url):
+    def create_tag(self, repo_path: str, tag: str, title: str):
         try:
-            repo = Repo.init(path)
-            with repo.config_reader() as cr:
-                try:
-                    name = cr.get_value('user', 'name')
-                    email = cr.get_value('user', 'email')
-                    if not name or not email:
-                        raise ValueError("User name or email not configured.")
-                except (configparser.NoSectionError, configparser.NoOptionError, ValueError):
-                    self.error_occurred.emit(
-                        "Git user config is missing.\n\n"
-                        "Please configure your user identity in Preferences > Source Control."
-                    )
+            repo = Repo(repo_path)
+            author = self._get_author(repo)
+            if not author:
+                return
+
+            if not repo.head.is_valid():
+                log.info("No commits found. Creating initial commit for release.")
+                if repo.is_dirty(untracked_files=True):
+                    repo.git.add(A=True)
+                    repo.index.commit("Initial commit for release", author=author, committer=author)
+                else:
+                    self.error_occurred.emit("Cannot tag an empty project with no files.")
                     return
 
-            repo.git.add(A=True)
-            if not repo.head.is_valid():
-                repo.index.commit("Initial commit")
+            if tag in repo.tags:
+                log.warning(f"Tag '{tag}' already exists. Re-creating it.")
+                repo.delete_tag(tag)
+            repo.create_tag(tag, message=title)
+            self.operation_success.emit(f"Tag created: {tag}", {})
+        except GitCommandError as e:
+            self.error_occurred.emit(f"Failed to create tag: {e}")
+
+    def delete_tag(self, repo_path: str, tag: str):
+        try:
+            repo = Repo(repo_path)
+            repo.delete_tag(tag)
+            self.operation_success.emit(f"Local tag '{tag}' deleted.", {})
+        except GitCommandError as e:
+            self.error_occurred.emit(f"Failed to delete local tag '{tag}': {e}")
+
+    def delete_remote_tag(self, repo_path: str, tag: str):
+        try:
+            repo = Repo(repo_path)
+            repo.remotes.origin.push(refspec=f":{tag}")
+            self.operation_success.emit(f"Remote tag '{tag}' deleted.", {})
+        except GitCommandError as e:
+            self.error_occurred.emit(f"Failed to delete remote tag '{tag}': {e}")
+
+    def publish_repo(self, path: str, url: str):
+        try:
+            repo = Repo.init(path)
+            author = self._get_author(repo)
+            if not author:
+                return
+            repo.git.branch('-M', 'main')
+            if repo.is_dirty(untracked_files=True) and not repo.head.is_valid():
+                repo.git.add(A=True)
+                repo.index.commit("Initial commit", author=author, committer=author)
             if 'origin' in repo.remotes:
-                origin = repo.remotes.origin
-                origin.set_url(url)
+                repo.remotes.origin.set_url(url)
             else:
-                origin = repo.create_remote('origin', url)
-            origin.push(refspec='HEAD:main', set_upstream=True)
-            self.operation_success.emit(f"Successfully published project to {url}", {})
-        except Exception as e:
+                repo.create_remote('origin', url)
+            repo.remotes.origin.push(refspec='main:main', set_upstream=True)
+            self.operation_success.emit(f"Successfully published to {url}", {'repo_path': path})
+        except GitCommandError as e:
             log.error(f"Publish failed: {e}", exc_info=True)
             self.error_occurred.emit(f"Publish failed: {e}")
+
+    def link_to_remote(self, local_path: str, remote_url: str):
+        try:
+            repo = Repo.init(local_path)
+            if 'origin' in repo.remotes:
+                repo.remotes.origin.set_url(remote_url)
+            else:
+                repo.create_remote('origin', remote_url)
+            repo.remotes.origin.fetch()
+            remote_head = repo.remote().refs.HEAD
+            branch_name = remote_head.reference.name.split('/')[-1] if remote_head.is_valid() else 'main'
+            repo.git.branch('-M', branch_name)
+            if remote_head.is_valid():
+                repo.git.reset('--soft', f'origin/{branch_name}')
+            if repo.is_dirty(untracked_files=True) and not repo.head.is_valid():
+                author = self._get_author(repo)
+                if not author:
+                    return
+                repo.git.add(A=True)
+                repo.index.commit("Initial commit after linking to remote", author=author, committer=author)
+            self.operation_success.emit(f"Successfully linked to {remote_url}", {})
+        except GitCommandError as e:
+            self.error_occurred.emit(f"Failed to link repository: {e}")
+
+    def fix_main_master_divergence(self, repo_path: str):
+        try:
+            repo = Repo(repo_path)
+            log.info(f"Fixing branch mismatch in {repo_path}")
+            repo.git.branch('-M', 'master', 'main')
+            repo.git.push('--force', '-u', 'origin', 'main')
+            repo.git.push('origin', '--delete', 'master')
+            self.operation_success.emit("'main' is now the primary branch.", {'repo_path': repo_path})
+        except GitCommandError as e:
+            self.error_occurred.emit(f"Failed to fix branch mismatch: {e}")
 
 
 class SourceControlManager(QObject):
@@ -263,21 +259,24 @@ class SourceControlManager(QObject):
     _request_summaries = pyqtSignal(list)
     _request_status = pyqtSignal(str)
     _request_commit = pyqtSignal(str, str)
-    _request_push = pyqtSignal(str)
+    _request_push = pyqtSignal(str, str)
     _request_pull = pyqtSignal(str)
-    _request_clone = pyqtSignal(str, str, str)
+    _request_clone = pyqtSignal(str, str, object)
     _request_publish = pyqtSignal(str, str)
     _request_create_tag = pyqtSignal(str, str, str)
+    _request_delete_tag = pyqtSignal(str, str)
+    _request_delete_remote_tag = pyqtSignal(str, str)
     _request_link_to_remote = pyqtSignal(str, str)
     _request_get_git_config = pyqtSignal()
     _request_set_git_config = pyqtSignal(str, str)
+    _request_fix_branches = pyqtSignal(str)
+    _request_set_default_branch = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
         self.thread = QThread()
         self.worker = GitWorker()
         self.worker.moveToThread(self.thread)
-
         self._request_summaries.connect(self.worker.get_multiple_repo_summaries)
         self._request_status.connect(self.worker.get_status)
         self._request_commit.connect(self.worker.commit_files)
@@ -286,52 +285,86 @@ class SourceControlManager(QObject):
         self._request_clone.connect(self.worker.clone_repo)
         self._request_publish.connect(self.worker.publish_repo)
         self._request_create_tag.connect(self.worker.create_tag)
+        self._request_delete_tag.connect(self.worker.delete_tag)
+        self._request_delete_remote_tag.connect(self.worker.delete_remote_tag)
         self._request_link_to_remote.connect(self.worker.link_to_remote)
         self._request_get_git_config.connect(self.worker.get_git_config)
         self._request_set_git_config.connect(self.worker.set_git_config)
-
+        self._request_fix_branches.connect(self.worker.fix_main_master_divergence)
+        self._request_set_default_branch.connect(self.worker.set_default_branch)
         self.worker.summaries_ready.connect(self.summaries_ready)
         self.worker.status_ready.connect(self.status_updated)
         self.worker.error_occurred.connect(self.git_error)
         self.worker.operation_success.connect(self.git_success)
         self.worker.git_config_ready.connect(self.git_config_ready)
-
         self.thread.start()
+
+    @staticmethod
+    def parse_git_url(url: str) -> tuple[Optional[str], Optional[str]]:
+        if match := re.search(r"github\.com/([^/]+)/([^/.]+)", url):
+            return match.group(1), match.group(2)
+        if match := re.search(r"github\.com:([^/]+)/([^/.]+)", url):
+            return match.group(1), match.group(2)
+        return None, None
+
+    def get_local_branches(self, repo_path: str) -> List[str]:
+        try:
+            return [b.name for b in Repo(repo_path).branches]
+        except (InvalidGitRepositoryError, TypeError):
+            return []
 
     def get_git_config(self):
         self._request_get_git_config.emit()
 
-    def set_git_config(self, name, email):
+    def set_git_config(self, name: str, email: str):
         self._request_set_git_config.emit(name, email)
+
+    def set_default_branch_to_main(self):
+        self._request_set_default_branch.emit()
 
     def link_to_remote(self, path: str, url: str):
         self._request_link_to_remote.emit(path, url)
 
-    def get_summaries(self, paths: list):
+    def fix_branch_mismatch(self, path: str):
+        self._request_fix_branches.emit(path)
+
+    def get_summaries(self, paths: List[str]):
         self._request_summaries.emit(paths)
 
-    def get_status(self, path):
+    def get_status(self, path: str):
         self._request_status.emit(path)
 
-    def commit_files(self, path, msg):
+    def commit_files(self, path: str, msg: str):
         self._request_commit.emit(path, msg)
 
-    def push(self, path):
-        self._request_push.emit(path)
+    def push(self, path: str):
+        self._request_push.emit(path, None)
 
-    def pull(self, path):
+    def push_specific_tag(self, path: str, tag_name: str):
+        self._request_push.emit(path, tag_name)
+
+    def pull(self, path: str):
         self._request_pull.emit(path)
 
-    def clone_repo(self, url, path, branch):
+    def clone_repo(self, url: str, path: str, branch: Optional[str] = None):
         self._request_clone.emit(url, path, branch)
 
-    def publish_repo(self, path, url):
+    def publish_repo(self, path: str, url: str):
         self._request_publish.emit(path, url)
 
-    def create_tag(self, path, tag, title):
+    def create_tag(self, path: str, tag: str, title: str):
         self._request_create_tag.emit(path, tag, title)
 
+    def delete_tag(self, path: str, tag: str):
+        self._request_delete_tag.emit(path, tag)
+
+    def delete_remote_tag(self, path: str, tag: str):
+        self._request_delete_remote_tag.emit(path, tag)
+
     def shutdown(self):
-        if self.thread.isRunning():
+        if self.thread and self.thread.isRunning():
+            log.info("Shutting down SourceControlManager thread.")
             self.thread.quit()
-            self.thread.wait(3000)
+            if not self.thread.wait(3000):
+                log.warning("SourceControlManager thread did not shut down gracefully. Terminating.")
+                self.thread.terminate()

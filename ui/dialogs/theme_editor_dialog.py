@@ -1,277 +1,327 @@
 # PuffinPyEditor/ui/dialogs/theme_editor_dialog.py
-import sys
 import os
 import json
 import re
 import datetime
+import copy
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QWidget,
-                             QLabel, QLineEdit, QPushButton, QDialogButtonBox, QFileDialog,
+                             QLabel, QLineEdit, QPushButton, QDialogButtonBox,
                              QScrollArea, QMessageBox, QColorDialog, QListWidget,
-                             QListWidgetItem, QSplitter, QFrame)
+                             QListWidgetItem, QSplitter, QFrame, QGroupBox)
 from PyQt6.QtGui import QColor, QFont, QPixmap, QIcon
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from utils.logger import log
-from app_core.theme_manager import theme_manager, CUSTOM_THEMES_FILE_PATH
+from app_core.theme_manager import theme_manager
 
 
-# --- Helper Widget for Color Picking ---
 class ColorPickerButton(QPushButton):
-    color_changed = pyqtSignal(QColor)
+    color_changed = pyqtSignal(str, QColor)
 
-    def __init__(self, initial_color=QColor("black"), parent=None):
+    def __init__(self, key_name: str, initial_color=QColor("black"), parent=None):
         super().__init__(parent)
-        self._color = initial_color
-        self.setFixedSize(QSize(130, 28));
+        self.key_name = key_name
+        self._color = QColor(initial_color)
+        self.setFixedSize(QSize(130, 28))
         self.setIconSize(QSize(20, 20))
-        self._update_swatch();
+        self._update_swatch()
         self.clicked.connect(self._pick_color)
 
     def _update_swatch(self):
-        pixmap = QPixmap(self.iconSize());
+        pixmap = QPixmap(self.iconSize())
         pixmap.fill(self._color)
-        self.setIcon(QIcon(pixmap));
+        self.setIcon(QIcon(pixmap))
         self.setText(self._color.name().upper())
 
-    def set_color(self, new_color):
+    def set_color(self, new_color: QColor, from_picker=False):
+        new_color = QColor(new_color)
         if self._color != new_color:
-            self._color = new_color;
-            self._update_swatch();
-            self.color_changed.emit(self._color)
+            self._color = new_color
+            self._update_swatch()
+            if from_picker:
+                self.color_changed.emit(self.key_name, self._color)
 
-    def get_color(self):
+    def get_color(self) -> QColor:
         return self._color
 
     def _pick_color(self):
         dialog = QColorDialog(self._color, self)
-        if dialog.exec(): self.set_color(dialog.currentColor())
+        if dialog.exec():
+            self.set_color(dialog.currentColor(), from_picker=True)
 
 
-class ExampleWidget(QLabel):
-    def __init__(self, text="Example", parent=None):
-        super().__init__(text, parent)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter);
-        self.setMinimumWidth(100)
-        self.setAutoFillBackground(True);
-        self.setStyleSheet("border: 1px solid grey; border-radius: 4px; padding: 4px;")
-
-
-# --- Dialog for Theme Editing ---
 class ThemeEditorDialog(QDialog):
     custom_themes_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        log.info("ThemeEditorDialog initializing...");
+        log.info("ThemeEditorDialog initializing...")
         self.setWindowTitle("Theme Customizer")
-        self.setMinimumSize(QSize(950, 700));
+        self.setMinimumSize(QSize(950, 700))
         self.setModal(True)
-        self.COLOR_GROUPS = {"Window & General": ["window.", "sidebar.", "accent"],
-                             "Controls": ["button.", "input.", "scrollbar."], "Bars & Menus": ["statusbar.", "menu."],
-                             "Editor Tabs": ["tab."], "Editor": ["editor.", "editorGutter."],
-                             "Syntax Highlighting": ["syntax."]}
-        self.current_theme_id = None;
-        self.is_custom_theme = False;
-        self.color_widgets = {};
+        self.COLOR_GROUPS = {
+            "Window & General": ["window.background", "sidebar.background", "accent"],
+            "Editor": ["editor.background", "editor.foreground", "editor.lineHighlightBackground"],
+            "Editor Gutter": ["editorGutter.background", "editorGutter.foreground"],
+            "Editor Matching": ["editor.matchingBracketBackground", "editor.matchingBracketForeground"],
+            "Controls": ["button.background", "button.foreground", "input.background", "input.foreground",
+                         "input.border"],
+            "Bars & Menus": ["statusbar.background", "statusbar.foreground", "menu.background", "menu.foreground"],
+            "Editor Tabs": ["tab.activeBackground", "tab.inactiveBackground", "tab.activeForeground",
+                            "tab.inactiveForeground"],
+            "Scrollbar": ["scrollbar.background", "scrollbar.handle", "scrollbar.handleHover",
+                          "scrollbar.handlePressed"],
+            "Syntax Highlighting": ["syntax.keyword", "syntax.operator", "syntax.brace", "syntax.decorator",
+                                    "syntax.self",
+                                    "syntax.className", "syntax.functionName", "syntax.comment", "syntax.string",
+                                    "syntax.docstring", "syntax.number"]
+        }
+        self.current_theme_id = None
+        self.is_custom_theme = False
+        self.color_widgets = {}
         self.unsaved_changes = False
-        self._setup_ui();
-        self._repopulate_theme_list();
+        self._setup_ui()
+        self._repopulate_theme_list()
         self._update_ui_state()
         log.info("ThemeEditorDialog initialized successfully.")
 
     def _setup_ui(self):
-        self.main_layout = QVBoxLayout(self);
+        self.main_layout = QVBoxLayout(self)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_layout.addWidget(self.splitter, 1)
-        self._create_left_pane();
+        self._create_left_pane()
         self._create_right_pane()
         self.splitter.setSizes([240, 710])
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        button_box.rejected.connect(self.reject);
-        self.main_layout.addWidget(button_box)
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        self.button_box.rejected.connect(self.reject)
+        self.main_layout.addWidget(self.button_box)
 
     def _create_left_pane(self):
-        container = QWidget();
-        layout = QVBoxLayout(container);
+        container = QWidget()
+        layout = QVBoxLayout(container)
         layout.setContentsMargins(5, 5, 5, 5)
-        layout.addWidget(QLabel("<b>Available Themes:</b>"));
+        layout.addWidget(QLabel("<b>Available Themes:</b>"))
         self.theme_list_widget = QListWidget()
         self.theme_list_widget.setAlternatingRowColors(True)
         self.theme_list_widget.currentItemChanged.connect(self._on_theme_selection_changed)
         layout.addWidget(self.theme_list_widget, 1)
-        actions_layout = QHBoxLayout();
-        self.import_button = QPushButton("Import...")
-        self.duplicate_button = QPushButton("Duplicate");
+        actions_layout = QHBoxLayout()
+        self.duplicate_button = QPushButton("Duplicate")
         self.delete_button = QPushButton("Delete")
-        self.import_button.clicked.connect(self._action_import_theme)
         self.duplicate_button.clicked.connect(self._action_duplicate_theme)
         self.delete_button.clicked.connect(self._action_delete_theme)
-        actions_layout.addWidget(self.import_button);
-        actions_layout.addWidget(self.duplicate_button);
+        actions_layout.addWidget(self.duplicate_button)
         actions_layout.addWidget(self.delete_button)
-        layout.addLayout(actions_layout);
+        layout.addLayout(actions_layout)
         self.splitter.addWidget(container)
 
     def _create_right_pane(self):
-        container = QWidget();
-        layout = QVBoxLayout(container);
+        container = QWidget()
+        layout = QVBoxLayout(container)
         layout.setContentsMargins(10, 5, 5, 5)
-        form_layout = QGridLayout();
+        form_layout = QGridLayout()
         form_layout.addWidget(QLabel("<b>Theme Name:</b>"), 0, 0)
-        self.name_edit = QLineEdit();
+        self.name_edit = QLineEdit()
         self.name_edit.textChanged.connect(self._mark_unsaved_changes)
         form_layout.addWidget(self.name_edit, 0, 1)
-        self.info_label = QLabel();
+        self.info_label = QLabel()
         self.info_label.setStyleSheet("font-style: italic; color: grey;")
-        form_layout.addWidget(self.info_label, 1, 1);
-        form_layout.setColumnStretch(1, 1);
+        form_layout.addWidget(self.info_label, 1, 1)
+        form_layout.setColumnStretch(1, 1)
         layout.addLayout(form_layout)
-        scroll_area = QScrollArea();
-        scroll_area.setWidgetResizable(True);
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll_content = QWidget();
+        self.scroll_content = QWidget()
         self.v_scroll_layout = QVBoxLayout(self.scroll_content)
         self.v_scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        scroll_area.setWidget(self.scroll_content);
+        scroll_area.setWidget(self.scroll_content)
         layout.addWidget(scroll_area, 1)
-        actions_layout = QHBoxLayout();
+        actions_layout = QHBoxLayout()
         self.reset_button = QPushButton("Reset Changes")
-        self.update_button = QPushButton("Update Custom Theme");
-        self.save_as_new_button = QPushButton("Save as New")
-        self.reset_button.clicked.connect(self._load_theme_to_editor);
-        self.update_button.clicked.connect(lambda: self._action_save(is_update=True))
-        self.save_as_new_button.clicked.connect(lambda: self._action_save(is_update=False))
-        actions_layout.addWidget(self.reset_button);
+        self.update_button = QPushButton("Update Custom Theme")
+        self.reset_button.clicked.connect(self._load_theme_to_editor)
+        self.update_button.clicked.connect(self._action_save)
+        actions_layout.addWidget(self.reset_button)
         actions_layout.addStretch()
-        actions_layout.addWidget(self.update_button);
-        actions_layout.addWidget(self.save_as_new_button)
-        layout.addLayout(actions_layout);
+        actions_layout.addWidget(self.update_button)
+        layout.addLayout(actions_layout)
         self.splitter.addWidget(container)
 
-    def _action_import_theme(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Import Theme File", "", "JSON Files (*.json)")
-        if not filepath: return
-
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                imported_data = json.load(f)
-
-            if not isinstance(imported_data, dict) or not imported_data:
-                QMessageBox.warning(self, "Import Failed",
-                                    "The selected file is not a valid theme collection (must be a JSON object).");
-                return
-
-            custom_themes = {}
-            if os.path.exists(CUSTOM_THEMES_FILE_PATH):
-                try:
-                    with open(CUSTOM_THEMES_FILE_PATH, 'r', encoding='utf-8') as f:
-                        custom_themes = json.load(f)
-                except (json.JSONDecodeError, OSError):
-                    pass
-
-            imported_count = 0
-
-            for theme_key, theme_data in imported_data.items():
-                if isinstance(theme_data, dict) and "name" in theme_data and "colors" in theme_data:
-                    theme_name = theme_data["name"]
-                    theme_id = f"custom_{re.sub('[^a-z0-9_]', '', theme_name.lower())}_{int(datetime.datetime.now().timestamp()) + imported_count}"
-                    theme_data["is_custom"] = True
-
-                    custom_themes[theme_id] = theme_data
-                    imported_count += 1
-                else:
-                    log.warning(f"Skipping invalid object in theme file with key '{theme_key}'")
-
-            if imported_count == 0:
-                QMessageBox.warning(self, "Import Failed", "No valid themes could be found in the selected file.");
-                return
-
-            with open(CUSTOM_THEMES_FILE_PATH, 'w', encoding='utf-8') as f:
-                json.dump(custom_themes, f, indent=4)
-
-            theme_manager.reload_themes()
-            self.custom_themes_changed.emit()
-            self._repopulate_theme_list()
-            QMessageBox.information(self, "Success", f"{imported_count} theme(s) were imported successfully.")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Import Failed", f"An error occurred during import: {e}")
-            log.error(f"Failed to import theme from {filepath}: {e}", exc_info=True)
-
     def _repopulate_theme_list(self, select_theme_id=None):
-        self.theme_list_widget.blockSignals(True);
+        self.theme_list_widget.blockSignals(True)
         self.theme_list_widget.clear()
         all_themes = theme_manager.get_available_themes_for_ui()
-        target_row = 0;
-        current_selection = select_theme_id or self.current_theme_id
+        target_row = 0
+        current_selection = select_theme_id or self.current_theme_id or theme_manager.current_theme_id
         for i, (theme_id, name) in enumerate(all_themes.items()):
-            item = QListWidgetItem(name);
+            item = QListWidgetItem(name)
             item.setData(Qt.ItemDataRole.UserRole, theme_id)
             theme_data = theme_manager.get_theme_data_by_id(theme_id)
-            if theme_data and theme_data.get("is_custom"): item.setFont(
-                QFont(self.font().family(), -1, QFont.Weight.Bold))
+            if theme_data and theme_data.get("is_custom"):
+                item.setFont(QFont(self.font().family(), -1, QFont.Weight.Bold))
             self.theme_list_widget.addItem(item)
-            if theme_id == current_selection: target_row = i
-        self.theme_list_widget.setCurrentRow(target_row);
+            if theme_id == current_selection:
+                target_row = i
+        self.theme_list_widget.setCurrentRow(target_row)
         self.theme_list_widget.blockSignals(False)
         self._on_theme_selection_changed(self.theme_list_widget.currentItem(), None)
 
     def _on_theme_selection_changed(self, current, previous):
-        if not current: self._clear_editor(); return
+        if not current:
+            self._clear_editor()
+            return
         if self.unsaved_changes and current is not previous:
-            if QMessageBox.question(self, "Unsaved Changes", "Discard changes?",
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                    QMessageBox.StandardButton.No) == QMessageBox.StandardButton.No:
+            reply = QMessageBox.question(self, "Unsaved Changes", "Discard changes to the previous theme?",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                         QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.No:
                 self.theme_list_widget.blockSignals(True)
-                if previous: self.theme_list_widget.setCurrentItem(previous)
-                self.theme_list_widget.blockSignals(False);
+                if previous:
+                    self.theme_list_widget.setCurrentItem(previous)
+                self.theme_list_widget.blockSignals(False)
                 return
         new_theme_id = current.data(Qt.ItemDataRole.UserRole)
-        if new_theme_id != self.current_theme_id: self.current_theme_id = new_theme_id; self._load_theme_to_editor()
+        if new_theme_id != self.current_theme_id:
+            self.current_theme_id = new_theme_id
+            self._load_theme_to_editor()
 
     def _load_theme_to_editor(self):
         theme_data = theme_manager.get_theme_data_by_id(self.current_theme_id)
-        if not theme_data or "colors" not in theme_data: self._clear_editor(); return
-        self._clear_layout(self.v_scroll_layout);
+        if not theme_data or "colors" not in theme_data:
+            self._clear_editor()
+            return
+
+        self._clear_layout(self.v_scroll_layout)
         self.color_widgets.clear()
-        sorted_keys = sorted(theme_data["colors"].keys())
+
         self.is_custom_theme = theme_data.get("is_custom", False)
-        self.name_edit.setText(theme_data.get("name", ""));
-        self.info_label.setText(f"Editing: {theme_data.get('name')}")
-        self.unsaved_changes = False;
+        self.name_edit.setText(theme_data.get("name", ""))
+        self.name_edit.setReadOnly(not self.is_custom_theme)
+        self.info_label.setText(f"Author: {theme_data.get('author', 'N/A')}")
+
+        all_color_keys = theme_data["colors"].keys()
+        sorted_keys = sorted(all_color_keys)
+
+        for group_name, prefixes in self.COLOR_GROUPS.items():
+            group_keys = [k for k in sorted_keys if any(k.startswith(p) for p in prefixes)]
+            if not group_keys:
+                continue
+
+            group_box = QGroupBox(group_name)
+            grid = QGridLayout(group_box)
+            grid.setSpacing(5)
+            row, col = 0, 0
+            for key in group_keys:
+                color_val = QColor(theme_data["colors"][key])
+                picker = ColorPickerButton(key, color_val)
+                picker.setEnabled(self.is_custom_theme)
+                picker.color_changed.connect(self._mark_unsaved_changes)
+                self.color_widgets[key] = picker
+                grid.addWidget(QLabel(f"{key.split('.')[-1]}:"), row, col)
+                grid.addWidget(picker, row, col + 1)
+                col += 2
+                if col >= 4:
+                    col = 0
+                    row += 1
+            self.v_scroll_layout.addWidget(group_box)
+
+        self.v_scroll_layout.addStretch()
+        self.unsaved_changes = False
         self._update_ui_state()
 
     def _action_duplicate_theme(self):
-        pass
+        if not self.current_theme_id:
+            return
+        original_theme = copy.deepcopy(theme_manager.get_theme_data_by_id(self.current_theme_id))
+        if not original_theme:
+            return
+
+        new_name = f"{original_theme.get('name', 'New Theme')} (Copy)"
+        new_id = f"custom_{re.sub('[^a-z0-9_]', '', new_name.lower())}_{int(datetime.datetime.now().timestamp())}"
+
+        original_theme['name'] = new_name
+        original_theme['author'] = "PuffinPy User"
+        original_theme['is_custom'] = True
+
+        theme_manager.add_or_update_custom_theme(new_id, original_theme)
+        self.custom_themes_changed.emit()
+        self._repopulate_theme_list(select_theme_id=new_id)
 
     def _action_delete_theme(self):
-        pass
+        if not self.current_theme_id or not self.is_custom_theme:
+            return
+        theme_name = theme_manager.get_theme_data_by_id(self.current_theme_id).get('name', self.current_theme_id)
+        reply = QMessageBox.question(self, "Confirm Delete",
+                                     f"Are you sure you want to delete the theme '{theme_name}'?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            theme_manager.delete_custom_theme(self.current_theme_id)
+            self.custom_themes_changed.emit()
+            if self.current_theme_id == theme_manager.current_theme_id:
+                theme_manager.set_theme("puffin_dark")
+            self._repopulate_theme_list(select_theme_id="puffin_dark")
 
-    def _action_save(self, is_update):
-        pass
+    def _action_save(self):
+        if not self.is_custom_theme or not self.unsaved_changes:
+            return
+        theme_data = copy.deepcopy(theme_manager.get_theme_data_by_id(self.current_theme_id))
+        theme_data['name'] = self.name_edit.text()
+        for key, widget in self.color_widgets.items():
+            theme_data['colors'][key] = widget.get_color().name()
 
-    def _mark_unsaved_changes(self):
-        self.unsaved_changes = True; self._update_ui_state()
+        theme_manager.add_or_update_custom_theme(self.current_theme_id, theme_data)
+        self.custom_themes_changed.emit()
+        self.unsaved_changes = False
+        self._update_ui_state()
+        if self.current_theme_id == theme_manager.current_theme_id:
+            theme_manager.set_theme(self.current_theme_id)
+        QMessageBox.information(self, "Success", f"Theme '{theme_data['name']}' has been updated.")
+
+    def _mark_unsaved_changes(self, *args):
+        if self.is_custom_theme:
+            self.unsaved_changes = True
+            self._update_ui_state()
 
     def _update_ui_state(self):
         has_selection = self.current_theme_id is not None
-        self.name_edit.setEnabled(has_selection)
-        self.reset_button.setEnabled(has_selection and self.unsaved_changes)
-        self.save_as_new_button.setEnabled(has_selection and self.unsaved_changes)
-        self.update_button.setEnabled(self.is_custom_theme and self.unsaved_changes)
-        self.delete_button.setEnabled(self.is_custom_theme)
+        can_edit = self.is_custom_theme
+        self.name_edit.setEnabled(can_edit)
+        self.reset_button.setEnabled(can_edit and self.unsaved_changes)
+        self.update_button.setEnabled(can_edit and self.unsaved_changes)
+        self.delete_button.setEnabled(can_edit)
         self.duplicate_button.setEnabled(has_selection)
+        for widget in self.color_widgets.values():
+            widget.setEnabled(can_edit)
 
     def _clear_layout(self, layout):
-        pass
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+            else:
+                sub_layout = item.layout()
+                if sub_layout is not None:
+                    self._clear_layout(sub_layout)
 
     def _clear_editor(self):
-        pass
+        self._clear_layout(self.v_scroll_layout)
+        self.name_edit.clear()
+        self.info_label.clear()
+        self.current_theme_id = None
+        self.is_custom_theme = False
+        self.unsaved_changes = False
+        self._update_ui_state()
 
     def reject(self):
         if self.unsaved_changes:
-            if QMessageBox.question(self, "Unsaved Changes", "Discard changes?",
-                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                    QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            reply = QMessageBox.question(self, "Unsaved Changes", "Discard changes and close?",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                         QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
                 super().reject()
         else:
             super().reject()

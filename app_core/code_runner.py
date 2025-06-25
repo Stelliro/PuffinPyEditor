@@ -1,107 +1,137 @@
 # PuffinPyEditor/app_core/code_runner.py
-import subprocess
 import os
 import sys
-from PyQt6.QtCore import QObject, QThread, pyqtSignal, QProcess
+import shutil
+from PyQt6.QtCore import QObject, pyqtSignal, QProcess
+from .settings_manager import settings_manager
 from utils.logger import log
-from app_core.settings_manager import settings_manager
+from typing import Optional
+
+
+def _find_python_interpreter() -> str:
+    """
+    Intelligently finds the best Python executable for running scripts.
+    This prevents the app from trying to execute itself when frozen.
+
+    Priority:
+    1. User-defined path in settings.
+    2. The python.exe from the current virtual environment (if running from source).
+    3. The first 'python' found on the system's PATH.
+    4. The python.exe bundled alongside the main PuffinPyEditor.exe.
+
+    Returns:
+        The path to a suitable Python executable, or an empty string if none found.
+    """
+    # 1. User-defined path
+    user_path = settings_manager.get("python_interpreter_path", "").strip()
+    if user_path and os.path.exists(user_path) and "PuffinPyEditor.exe" not in user_path:
+        log.info(f"CodeRunner: Using user-defined interpreter: {user_path}")
+        return user_path
+
+    # 2. Venv python if running from source
+    if not getattr(sys, 'frozen', False):
+        log.info(f"CodeRunner: Running from source, using sys.executable: {sys.executable}")
+        return sys.executable
+
+    # 3. System PATH python
+    system_python = shutil.which("python")
+    if system_python and "PuffinPyEditor.exe" not in system_python:
+        log.info(f"CodeRunner: Found system python on PATH: {system_python}")
+        return system_python
+
+    # 4. Local python.exe if frozen (e.g., if bundled with the app)
+    if getattr(sys, 'frozen', False):
+        local_python_path = os.path.join(os.path.dirname(sys.executable), "python.exe")
+        if os.path.exists(local_python_path):
+            log.info(f"CodeRunner: Found local python.exe in frozen app dir: {local_python_path}")
+            return local_python_path
+
+    log.error("CodeRunner: Could not find a suitable Python interpreter.")
+    return ""
 
 
 class CodeRunner(QObject):
+    """
+    Manages the execution of Python scripts in a separate process.
+    """
     output_received = pyqtSignal(str)
     error_received = pyqtSignal(str)
     process_finished = pyqtSignal(int)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
-        self.process = None
+        self.process: Optional[QProcess] = None
 
     def run_script(self, script_filepath: str):
+        """
+        Executes a Python script using the configured interpreter.
+
+        Args:
+            script_filepath: The absolute path to the Python script to run.
+        """
         if not script_filepath or not os.path.exists(script_filepath):
-            error_msg = f"Script path is invalid or file does not exist: {script_filepath}"
-            log.error(error_msg)
-            self.error_received.emit(error_msg)
+            err_msg = f"Script path is invalid or does not exist: {script_filepath}"
+            log.error(err_msg)
+            self.error_received.emit(err_msg + "\n")
             self.process_finished.emit(-1)
             return
 
-        python_interpreter = settings_manager.get("python_interpreter_path", "").strip()
-        if not python_interpreter:
-            python_interpreter = sys.executable
-            log.info(f"No specific Python interpreter set; using current interpreter: {python_interpreter}")
+        interpreter_path = _find_python_interpreter()
 
-        if not python_interpreter or not os.path.exists(python_interpreter):
-            error_msg = f"Python interpreter path is invalid or not set: '{python_interpreter}'." \
-                        f"\nPlease set it in Preferences -> Run."
-            log.error(error_msg)
-            self.error_received.emit(error_msg)
+        if not interpreter_path:
+            err_msg = ("Could not find a valid Python interpreter.\n"
+                       "Please set a path in Preferences -> Run or ensure 'python' is in your system PATH.")
+            log.error(err_msg)
+            self.error_received.emit(err_msg + "\n")
             self.process_finished.emit(-1)
             return
 
         if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
             warning_msg = "A script is already running. Please wait for it to complete."
             log.warning(warning_msg)
-            self.error_received.emit(f"[INFO] {warning_msg}")
+            self.error_received.emit(f"[INFO] {warning_msg}\n")
             return
 
         self.process = QProcess()
-        self.process.setProgram(python_interpreter)
+        self.process.setProgram(interpreter_path)
         self.process.setArguments([script_filepath])
 
+        # Set the working directory to the script's directory for correct relative imports
         script_dir = os.path.dirname(script_filepath)
         self.process.setWorkingDirectory(script_dir)
-        log.info(f"Setting working directory for script execution to: {script_dir}")
+        log.info(f"Setting working directory for script to: {script_dir}")
 
+        # Connect signals
         self.process.readyReadStandardOutput.connect(self._handle_stdout)
         self.process.readyReadStandardError.connect(self._handle_stderr)
         self.process.finished.connect(self._handle_finished)
         self.process.errorOccurred.connect(self._handle_process_error)
 
-        log.info(f"Starting script: '{python_interpreter}' '{script_filepath}'")
+        log.info(f"Starting script: '{interpreter_path}' '{script_filepath}'")
         self.output_received.emit(f"[PuffinPyRun] Executing: {os.path.basename(script_filepath)} ...\n")
         self.process.start()
 
-        if not self.process.waitForStarted(timeout=5000):
-            error_msg = f"Failed to start the script process: {self.process.errorString()}"
-            log.error(error_msg)
-            self.error_received.emit(error_msg)
-            self.process_finished.emit(self.process.exitCode() if self.process else -1)
-            self.process = None
+        if not self.process.waitForStarted(5000):
+            err_msg = f"Failed to start process: {self.process.errorString()}"
+            log.error(err_msg)
+            self.error_received.emit(err_msg + "\n")
+            self.process_finished.emit(self.process.exitCode())
+            self.process = None  # Clean up the failed process
             return
 
-        log.debug(f"Process started successfully (PID: {self.process.processId() if self.process else 'N/A'}).")
-
-    def _handle_stdout(self):
-        if not self.process: return
-        data = self.process.readAllStandardOutput().data().decode(errors='replace')
-        self.output_received.emit(data)
-
-    def _handle_stderr(self):
-        if not self.process: return
-        data = self.process.readAllStandardError().data().decode(errors='replace')
-        self.error_received.emit(data)
-
-    def _handle_finished(self, exit_code: int, exit_status: QProcess.ExitStatus):
-        log.info(f"Script execution finished. Exit code: {exit_code}, Status: {exit_status.name}")
-        if exit_status == QProcess.ExitStatus.CrashExit:
-            self.error_received.emit(f"[PuffinPyRun] Script process crashed.\n")
-
-        self.output_received.emit(f"[PuffinPyRun] Process finished with exit code {exit_code}.\n")
-        self.process_finished.emit(exit_code)
-        self.process = None
-
-    def _handle_process_error(self, error: QProcess.ProcessError):
-        if not self.process: return
-        error_msg = f"[PuffinPyRun] QProcess Error: {self.process.errorString()} (Code: {error.name})"
-        log.error(error_msg)
-        self.error_received.emit(error_msg + "\n")
+        pid = self.process.processId() if self.process else 'N/A'
+        log.debug(f"Process started successfully (PID: {pid}).")
 
     def stop_script(self):
+        """Terminates the currently running script process."""
         if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
-            log.info(f"Attempting to terminate script process (PID: {self.process.processId()}).")
+            pid = self.process.processId()
+            log.info(f"Attempting to terminate process (PID: {pid}).")
             self.output_received.emit("[PuffinPyRun] Terminating script...\n")
             self.process.terminate()
+            # If terminate fails, forcefully kill it
             if not self.process.waitForFinished(1000):
-                log.warning("Process did not terminate gracefully, killing.")
+                log.warning(f"Process {pid} did not terminate gracefully, killing.")
                 self.process.kill()
                 self.output_received.emit("[PuffinPyRun] Script process killed.\n")
             else:
@@ -109,44 +139,27 @@ class CodeRunner(QObject):
         else:
             log.info("Stop script requested, but no process is running.")
 
+    def _handle_stdout(self):
+        if self.process:
+            data = self.process.readAllStandardOutput().data().decode(errors='replace')
+            self.output_received.emit(data)
 
-if __name__ == '__main__':
-    from PyQt6.QtWidgets import QApplication
+    def _handle_stderr(self):
+        if self.process:
+            data = self.process.readAllStandardError().data().decode(errors='replace')
+            self.error_received.emit(data)
 
-    app = QApplication.instance() or QApplication(sys.argv)
+    def _handle_finished(self, exit_code: int, exit_status: QProcess.ExitStatus):
+        log.info(f"Script finished. Exit code: {exit_code}, Status: {exit_status.name}")
+        if exit_status == QProcess.ExitStatus.CrashExit:
+            self.error_received.emit("[PuffinPyRun] Script process crashed.\n")
 
-    runner = CodeRunner()
+        self.output_received.emit(f"[PuffinPyRun] Process finished with exit code {exit_code}.\n")
+        self.process_finished.emit(exit_code)
+        self.process = None  # Clean up after finishing
 
-    test_script_path = "temp_test_script.py"
-    with open(test_script_path, "w") as f:
-        f.write("import time\n")
-        f.write("print('Hello from PuffinPyEditor test script!')\n")
-        f.write("time.sleep(1)\n")
-        f.write("print('This is standard output.')\n")
-        f.write("import sys\n")
-        f.write("sys.stderr.write('This is standard error output.\\n')\n")
-        f.write("time.sleep(1)\n")
-        f.write("print('Script finished.')\n")
-
-
-    def on_output(data): print(f"STDOUT: {data.strip()}")
-
-
-    def on_error(data): print(f"STDERR: {data.strip()}")
-
-
-    def on_finish(code):
-        print(f"FINISHED, Code: {code}")
-        os.remove(test_script_path)
-        QApplication.quit()
-
-
-    runner.output_received.connect(on_output)
-    runner.error_received.connect(on_error)
-    runner.process_finished.connect(on_finish)
-
-    print("Attempting to run test script...")
-    runner.run_script(os.path.abspath(test_script_path))
-
-
-    sys.exit(app.exec())
+    def _handle_process_error(self, error: QProcess.ProcessError):
+        if self.process:
+            err_msg = f"[PuffinPyRun] QProcess Error: {self.process.errorString()} (Code: {error.name})"
+            log.error(err_msg)
+            self.error_received.emit(err_msg + "\n")

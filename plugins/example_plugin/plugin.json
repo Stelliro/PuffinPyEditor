@@ -1,7 +1,0 @@
-{
-    "name": "Example Logger Plugin",
-    "author": "PuffinPy Team",
-    "version": "1.0.0",
-    "description": "A simple example plugin that adds a menu item to log a message.",
-    "entry_point": "plugin_main.py"
-}

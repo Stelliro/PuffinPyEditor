@@ -1,0 +1,1 @@
+{ "id": "source_control_ui", "name": "Source Control UI", "author": "PuffinPy Team", "version": "1.0.0", "description": "Provides the 'Source Control' panel to view Git status.", "entry_point": "plugin_main.py" }

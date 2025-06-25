@@ -1,0 +1,8 @@
+{
+    "id": "plugin_publisher",
+    "name": "Plugin Publisher",
+    "author": "AI Assistant",
+    "version": "1.0.0",
+    "description": "Adds a 'Publish Plugin...' tool to upload an installed plugin to a GitHub distribution repository.",
+    "entry_point": "plugin_main.py"
+}
