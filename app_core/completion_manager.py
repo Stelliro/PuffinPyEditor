@@ -2,7 +2,7 @@
 import os
 import sys
 import shutil
-from typing import Dict, List, Any, Optional
+from typing import Any, Optional
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 import jedi
 from .settings_manager import settings_manager
@@ -17,23 +17,25 @@ def find_python_interpreter_for_jedi() -> str:
 
     The priority is:
     1. User-defined path in settings.
-    2. The python.exe from the current virtual environment (if running from source).
+    2. The python.exe from the current venv (if running from source).
     3. A python.exe bundled alongside the main PuffinPyEditor.exe.
     4. The first 'python' found on the system's PATH.
 
     Returns:
-        The path to a suitable Python executable, or an empty string if none found.
+        The path to a suitable Python executable, or an empty string.
     """
     # 1. Prioritize user-defined path from settings
     user_path = settings_manager.get("python_interpreter_path")
-    if user_path and os.path.exists(user_path) and "PuffinPyEditor.exe" not in user_path:
+    if user_path and os.path.exists(user_path) and \
+            "PuffinPyEditor.exe" not in user_path:
         log.info(f"Jedi: Using user-defined interpreter: {user_path}")
         return user_path
 
     # 2. When running from source, sys.executable is the venv python.
     # When frozen, sys.executable is PuffinPyEditor.exe, which we must avoid.
     if not getattr(sys, 'frozen', False):
-        log.info(f"Jedi: Running from source, using sys.executable: {sys.executable}")
+        log.info("Jedi: Running from source, using sys.executable: "
+                 f"{sys.executable}")
         return sys.executable
 
     # 3. If the application is frozen (bundled with PyInstaller)
@@ -42,13 +44,15 @@ def find_python_interpreter_for_jedi() -> str:
         frozen_dir = os.path.dirname(sys.executable)
         local_python_path = os.path.join(frozen_dir, "python.exe")
         if os.path.exists(local_python_path):
-            log.info(f"Jedi: Found local python.exe in frozen app dir: {local_python_path}")
+            log.info("Jedi: Found local python.exe in frozen app dir: "
+                     f"{local_python_path}")
             return local_python_path
 
     # 4. As a last resort, search the system's PATH.
     system_python = shutil.which("python")
     if system_python:
-        log.warning(f"Jedi: Falling back to system python on PATH: {system_python}")
+        log.warning("Jedi: Falling back to system python on PATH: "
+                    f"{system_python}")
         return system_python
 
     # 5. If no suitable python is found, return empty string.
@@ -73,17 +77,22 @@ class JediWorker(QObject):
         try:
             python_executable = find_python_interpreter_for_jedi()
             if not python_executable:
-                log.error("JediWorker could not be initialized: No valid Python interpreter found.")
+                log.error("JediWorker could not be initialized: No valid "
+                          "Python interpreter found.")
                 self.project = None
                 return
 
             if project_path and os.path.isdir(project_path):
-                self.project = jedi.Project(path=project_path, environment_path=python_executable)
-                log.info(f"Jedi context set to project: {project_path} with interpreter: {python_executable}")
+                self.project = jedi.Project(path=project_path,
+                                            environment_path=python_executable)
+                log.info(f"Jedi context set to project: {project_path} with "
+                         f"interpreter: {python_executable}")
             else:
                 # Fallback to a default project if no path is given
-                self.project = jedi.get_default_project(sys_path=[os.path.dirname(python_executable)])
-                log.info(f"Jedi context set to default environment with interpreter: {python_executable}")
+                default_sys_path = [os.path.dirname(python_executable)]
+                self.project = jedi.get_default_project(sys_path=default_sys_path)
+                log.info("Jedi context set to default environment with "
+                         f"interpreter: {python_executable}")
 
         except Exception as e:
             log.error(f"Failed to initialize Jedi project: {e}", exc_info=True)
@@ -116,7 +125,8 @@ class JediWorker(QObject):
             definitions = script.goto(line=line, column=col)
             if definitions:
                 d = definitions[0]
-                log.info(f"Jedi found definition for '{d.name}' at {d.module_path}:{d.line}:{d.column}")
+                log.info(f"Jedi found definition for '{d.name}' at "
+                         f"{d.module_path}:{d.line}:{d.column}")
                 self.definition_ready.emit(str(d.module_path), d.line, d.column)
             else:
                 log.info("Jedi could not find a definition.")
@@ -203,20 +213,25 @@ class CompletionManager(QObject):
             header = f"def {signature.name}({params_str})"
             docstring = signature.docstring(raw=True).strip()
 
-            # Escape HTML characters in the docstring to prevent rendering issues
+            # Escape HTML characters in the docstring
             doc_html = docstring.replace('&', '&').replace('<', '<').replace('>', '>')
-            doc_html = f"<pre style='white-space: pre-wrap; margin: 0; padding: 0; font-family: inherit;'>{doc_html}</pre>"
+            doc_html = (
+                f"<pre style='white-space: pre-wrap; margin: 0; padding: 0; "
+                f"font-family: inherit;'>{doc_html}</pre>"
+            )
 
             tooltip_html = f"""
                 <div style='background-color: {bg}; color: {fg};
-                            font-family: Consolas, "Courier New", monospace; font-size: 10pt;
-                            padding: 8px; border-radius: 4px; border: 1px solid {border};'>
+                            font-family: Consolas, "Courier New", monospace;
+                            font-size: 10pt; padding: 8px; border-radius: 4px;
+                            border: 1px solid {border};'>
                     <b style='color: {accent};'>{header}</b>
             """
             if docstring:
                 tooltip_html += f"""
-                    <div style='border-top: 1px solid {border}; margin-top: 6px;
-                                padding-top: 6px; color: {doc_fg};'>
+                    <div style='border-top: 1px solid {border};
+                                margin-top: 6px; padding-top: 6px;
+                                color: {doc_fg};'>
                         {doc_html}
                     </div>
                 """
@@ -241,5 +256,6 @@ class CompletionManager(QObject):
 
             self.thread.quit()
             if not self.thread.wait(3000):  # Wait 3 seconds
-                log.warning("CompletionManager thread did not shut down gracefully. Terminating.")
+                log.warning("CompletionManager thread did not shut down "
+                            "gracefully. Terminating.")
                 self.thread.terminate()

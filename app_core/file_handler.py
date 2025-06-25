@@ -33,9 +33,10 @@ class FileHandler:
 
         Returns:
             A tuple containing (filepath, content, error_message).
-            On success, error_message is None. On failure, filepath and content are None.
+            On success, error_message is None. On failure, all are None.
         """
-        last_dir = settings_manager.get("last_opened_directory", os.path.expanduser("~"))
+        last_dir = settings_manager.get("last_opened_directory",
+                                        os.path.expanduser("~"))
         filepath, _ = QFileDialog.getOpenFileName(
             self.parent_window, "Open File", last_dir,
             "Python Files (*.py *.pyw);;All Files (*)"
@@ -50,7 +51,8 @@ class FileHandler:
             self._add_to_recent_files(filepath)
             return filepath, content, None
         except (IOError, OSError, UnicodeDecodeError) as e:
-            msg = f"Error opening file '{os.path.basename(filepath)}'.\n\nReason: {e}"
+            msg = f"Error opening file '{os.path.basename(filepath)}'." \
+                  f"\n\nReason: {e}"
             log.error(msg, exc_info=True)
             return None, None, msg
 
@@ -66,22 +68,25 @@ class FileHandler:
             save_as: If True, forces a "Save As" dialog.
 
         Returns:
-            The path where the file was saved, or None if the operation was cancelled.
+            The path where the file was saved, or None if cancelled.
         """
         dir_exists = filepath and os.path.exists(os.path.dirname(filepath))
         if save_as or not filepath or not dir_exists:
             last_dir = os.path.dirname(filepath) if dir_exists else \
-                       settings_manager.get("last_saved_directory", os.path.expanduser("~"))
+                settings_manager.get("last_saved_directory",
+                                     os.path.expanduser("~"))
             sugg_name = os.path.basename(filepath) if filepath else "Untitled.py"
 
             path_from_dialog, _ = QFileDialog.getSaveFileName(
-                self.parent_window, "Save File As", os.path.join(last_dir, sugg_name),
+                self.parent_window, "Save File As",
+                os.path.join(last_dir, sugg_name),
                 "Python Files (*.py *.pyw);;All Files (*)"
             )
             if not path_from_dialog:
                 return None  # User cancelled
             filepath = path_from_dialog
-            settings_manager.set("last_saved_directory", os.path.dirname(filepath))
+            settings_manager.set("last_saved_directory",
+                                 os.path.dirname(filepath))
 
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
@@ -127,7 +132,8 @@ class FileHandler:
 
         # Check for illegal characters (common across platforms)
         if re.search(r'[<>:"/\\|?*]', new_name):
-            return False, 'Name contains illegal characters (e.g., \\ / : * ? " < > |).'
+            return False, 'Name contains illegal characters ' \
+                   '(e.g., \\ / : * ? " < > |).'
 
         new_path = os.path.join(os.path.dirname(old_path), new_name)
         if os.path.exists(new_path):
@@ -160,7 +166,8 @@ class FileHandler:
             clipboard.setText(os.path.normpath(path))
             log.info(f"Copied path to clipboard: {path}")
             if self.parent_window:
-                self.parent_window.statusBar().showMessage("Path copied to clipboard", 2000)
+                self.parent_window.statusBar().showMessage(
+                    "Path copied to clipboard", 2000)
         except Exception as e:
             log.error(f"Could not copy path to clipboard: {e}")
 
@@ -175,7 +182,8 @@ class FileHandler:
                 subprocess.run(['open', '-R', os.path.normpath(path)])
             else:  # Linux and other UNIX-like systems
                 # Open the parent directory
-                subprocess.run(['xdg-open', os.path.dirname(os.path.normpath(path))])
+                dir_path = os.path.dirname(os.path.normpath(path))
+                subprocess.run(['xdg-open', dir_path])
         except Exception as e:
             log.error(f"Could not open file browser for path '{path}': {e}")
             QMessageBox.warning(self.parent_window, "Error",
@@ -194,5 +202,6 @@ class FileHandler:
         settings_manager.set("recent_files", recents[:max_files])
 
         # Notify main window to update its menu
-        if self.parent_window and hasattr(self.parent_window, '_update_recent_files_menu'):
+        if self.parent_window and \
+                hasattr(self.parent_window, '_update_recent_files_menu'):
             self.parent_window._update_recent_files_menu()

@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from utils.logger import log
 
-# Use a very unlikely string as a delimiter to avoid conflicts with file content
+# Use a very unlikely string as a delimiter
 SAFE_DELIMITER = "|||PUFFIN_LINT|||"
 
 
@@ -32,17 +32,21 @@ class LinterRunner(QObject):
 
         flake8_executable = self._find_flake8_executable()
         if not flake8_executable:
-            msg = "'flake8' executable not found on the system PATH. Please install it."
+            msg = "'flake8' executable not found. Please install it."
             log.error(f"Linter error: {msg}")
             self.error_occurred.emit(msg)
             return
 
-        command = [flake8_executable, filepath, "--format=%(row)d:%(col)d:%(code)s:%(text)s"]
+        command = [flake8_executable, filepath,
+                   "--format=%(row)d:%(col)d:%(code)s:%(text)s"]
         log.info(f"Running linter on file: {' '.join(command)}")
 
         try:
             # CREATE_NO_WINDOW prevents a console flash on Windows
-            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            creation_flags = 0
+            if sys.platform == "win32":
+                creation_flags = subprocess.CREATE_NO_WINDOW
+
             process = subprocess.Popen(
                 command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 text=True, encoding='utf-8', creationflags=creation_flags
@@ -55,7 +59,8 @@ class LinterRunner(QObject):
             results = self._parse_flake8_file_output(stdout)
             self.lint_results_ready.emit(results)
         except Exception as e:
-            log.error(f"Exception while running flake8 on file: {e}", exc_info=True)
+            log.error(f"Exception while running flake8 on file: {e}",
+                      exc_info=True)
             self.lint_results_ready.emit([])
 
     def run_linter_on_project(self, project_path: str):
@@ -68,14 +73,16 @@ class LinterRunner(QObject):
             return
 
         # Use the safe delimiter to reliably parse file paths from output
-        command = [
-            flake8_executable, project_path,
-            f"--format=%(path)s{SAFE_DELIMITER}%(row)d{SAFE_DELIMITER}%(col)d{SAFE_DELIMITER}%(code)s{SAFE_DELIMITER}%(text)s"
-        ]
+        format_str = (f"--format=%(path)s{SAFE_DELIMITER}%(row)d"
+                      f"{SAFE_DELIMITER}%(col)d{SAFE_DELIMITER}%(code)s"
+                      f"{SAFE_DELIMITER}%(text)s")
+        command = [flake8_executable, project_path, format_str]
         log.info(f"Running linter on project: {project_path}")
 
         try:
-            creation_flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+            creation_flags = 0
+            if sys.platform == "win32":
+                creation_flags = subprocess.CREATE_NO_WINDOW
             process = subprocess.Popen(
                 command, cwd=project_path, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, text=True, encoding='utf-8',
@@ -84,12 +91,13 @@ class LinterRunner(QObject):
             stdout, stderr = process.communicate(timeout=60)
 
             if stderr:
-                log.warning(f"Linter stderr for project {project_path}: {stderr.strip()}")
+                log.warning(f"Linter stderr for {project_path}: {stderr.strip()}")
 
             results = self._parse_flake8_project_output(stdout, project_path)
             self.project_lint_results_ready.emit(results)
         except Exception as e:
-            log.error(f"Exception while running flake8 on project: {e}", exc_info=True)
+            log.error(f"Exception while running flake8 on project: {e}",
+                      exc_info=True)
             self.project_lint_results_ready.emit({})
 
     def _parse_flake8_file_output(self, output: str) -> List[Dict]:
@@ -109,7 +117,8 @@ class LinterRunner(QObject):
                     log.warning(f"Could not parse linter line: {line}")
         return problems
 
-    def _parse_flake8_project_output(self, output: str, project_path: str) -> Dict[str, List[Dict]]:
+    def _parse_flake8_project_output(self, output: str,
+                                      project_path: str) -> Dict[str, List[Dict]]:
         """Parses flake8 output that uses the custom SAFE_DELIMITER."""
         problems_by_file = {}
         for line in output.strip().splitlines():
@@ -118,7 +127,8 @@ class LinterRunner(QObject):
                 try:
                     raw_path, line_num, col_num, code, desc = parts
                     # Ensure the path is absolute and normalized
-                    abs_path = os.path.normpath(os.path.join(project_path, raw_path))
+                    abs_path = os.path.normpath(os.path.join(project_path,
+                                                             raw_path))
                     problem = {
                         "line": int(line_num),
                         "col": int(col_num),
@@ -155,7 +165,8 @@ class LinterManager(QObject):
         self._request_file_lint.connect(self.runner.run_linter_on_file)
         self._request_project_lint.connect(self.runner.run_linter_on_project)
         self.runner.lint_results_ready.connect(self.lint_results_ready)
-        self.runner.project_lint_results_ready.connect(self.project_lint_results_ready)
+        self.runner.project_lint_results_ready.connect(
+            self.project_lint_results_ready)
         self.runner.error_occurred.connect(self.error_occurred)
 
         self.thread.start()
