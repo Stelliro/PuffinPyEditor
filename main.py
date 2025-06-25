@@ -15,12 +15,17 @@ def excepthook_handler(exc_type, exc_value, exc_tb):
     log.critical("--- FALLBACK EXCEPTION HANDLER ---")
     log.critical("An uncaught exception occurred. Details below.",
                  exc_info=(exc_type, exc_value, exc_tb))
-    sys.__excepthook__(exc_type, exc_value, exc_tb)
+    # It's crucial to call the original hook to ensure the app closes.
+    if 'original_hook' in locals() and original_hook:
+        original_hook(exc_type, exc_value, exc_tb)
+    else:
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
 
 
 def main():
     DEBUG_MODE = "--debug" in sys.argv
-    sys_excepthook = sys.excepthook  # Keep the original hook
+    # Store the original hook before we potentially replace it.
+    original_hook = sys.excepthook
 
     log.info("=" * 53)
     log.info(f"PuffinPyEditor Application Starting... (Debug: {DEBUG_MODE})")
@@ -28,15 +33,18 @@ def main():
     log.info(f"Operating System: {sys.platform}")
     log.info("=" * 53)
 
-    # Set up the enhanced crash reporter for ALL users.
-    # It provides immense value for bug reporting from anyone.
-    try:
-        from core_debug_tools.enhanced_exceptions.plugin_main import EnhancedExceptionsPlugin
-        EnhancedExceptionsPlugin(None, original_hook=sys_excepthook)
-        log.info("Enhanced exception reporter enabled for all users.")
-    except ImportError as e:
-        log.warning(f"Could not load enhanced exception handler, using basic logger: {e}")
-        sys.excepthook = excepthook_handler
+    # If in debug mode, set up the enhanced crash reporter immediately.
+    # This ensures even pre-GUI startup errors are caught nicely.
+    # For non-debug, we let the standard logging handle it.
+    if DEBUG_MODE:
+        try:
+            from core_debug_tools.enhanced_exceptions.plugin_main import EnhancedExceptionsPlugin
+            # Pass the original hook to our handler so it can call it after showing the dialog.
+            EnhancedExceptionsPlugin(main_window=None, original_hook=original_hook)
+            log.info("Enhanced exception reporter enabled for debug mode.")
+        except ImportError as e:
+            log.warning(f"Could not load enhanced exception handler, using basic logger: {e}")
+            sys.excepthook = excepthook_handler
 
     app = QApplication(sys.argv)
     app.setApplicationName("PuffinPyEditor")
@@ -54,9 +62,9 @@ def main():
         exit_code = app.exec()
         log.info(f"Application exited cleanly with code {exit_code}.")
         sys.exit(exit_code)
-    except Exception as e:
-        # This will be caught by our new hook!
-        log.critical(f"Exception during app.exec(): {e}", exc_info=True)
+    except Exception:
+        # This will be caught by our custom hook if it was set up.
+        log.critical("An unhandled exception occurred during app.exec().", exc_info=True)
         sys.exit(1)
 
 

@@ -1,12 +1,12 @@
 # PuffinPyEditor/ui/main_window.py
 import os
 import sys
-from typing import Optional
+from typing import Optional, Callable
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStatusBar, QSplitter,
                              QTabWidget, QMessageBox, QApplication, QFileDialog, QLabel,
                              QToolButton, QToolBar,
                              QSizePolicy, QMenu)
-from PyQt6.QtGui import QAction, QKeySequence, QColor, QFont, QActionGroup, QKeyEvent
+from PyQt6.QtGui import QAction, QKeySequence, QColor, QFont, QKeyEvent, QActionGroup
 from PyQt6.QtCore import Qt, QSize, QTimer, pyqtSignal
 
 import qtawesome as qta
@@ -44,6 +44,7 @@ class MainWindow(QMainWindow):
 
         self._initialize_managers()
         self.puffin_api = PuffinPluginAPI(self)
+        self.file_open_handlers: dict[str, Callable] = {}  # Hook for custom file openers
         log.info("Core API initialized.")
 
         self.setWindowTitle(f"PuffinPyEditor - v{versioning.APP_VERSION}")
@@ -75,15 +76,15 @@ class MainWindow(QMainWindow):
 
         log.info("Loading core debug tools...")
         try:
-            # --- DEFINITIVE FIX V3 ---
             # Step 1: Initialize the framework first to ensure debug_api exists.
             from core_debug_tools.debug_framework.plugin_main import initialize as init_framework
             self.debug_framework_instance = init_framework(self)
 
-            # Step 2: Now that the framework and its menu exist, load other debug tools.
+            # Step 2: Now that the framework is running, load other debug tools that depend on it.
             from core_debug_tools.live_log_viewer.plugin_main import initialize as init_log_viewer
             self.live_log_viewer_instance = init_log_viewer(self)
-            # --- END FIX ---
+
+            # The exception handler is already loaded in main.py, so we don't load it here.
 
         except Exception as e:
             log.error(f"Failed to load core debug tools: {e}", exc_info=True)
@@ -93,7 +94,6 @@ class MainWindow(QMainWindow):
                 f"Check logs for details.\n\nError: {e}"
             )
 
-    # ... (The rest of the file from here on is correct and remains unchanged.) ...
     def _initialize_managers(self):
         self.settings = settings_manager
         self.theme_manager = theme_manager
@@ -240,8 +240,6 @@ class MainWindow(QMainWindow):
         icon_color = "#000000" if QColor(accent_color).lightnessF() > 0.6 else "#FFFFFF"
         qta.set_defaults(color=accent_color, color_active=icon_color)
 
-        # This safe list includes actions created by the MainWindow itself.
-        # It's safer than iterating through all children.
         actions_with_icons = list(self.actions.values())
 
         for action in actions_with_icons:
@@ -249,8 +247,6 @@ class MainWindow(QMainWindow):
             if isinstance(icon_name, str) and icon_name:
                 action.setIcon(qta.icon(icon_name))
 
-        # Re-apply icons for any toolbar actions that might have been added by plugins.
-        # This is also safe because plugins use the API to add actions which sets string data.
         for action in self.main_toolbar.actions():
             icon_name = action.data()
             if isinstance(icon_name, str) and icon_name:
@@ -419,12 +415,23 @@ class MainWindow(QMainWindow):
 
     def _action_open_file(self, filepath: str, content: Optional[str] = None):
         norm_path = os.path.normpath(filepath)
+
+        # --- NEW: Check for custom file openers ---
+        ext = os.path.splitext(norm_path)[1].lower()
+        if ext in self.file_open_handlers:
+            self.file_open_handlers[ext](norm_path)
+            return
+        # --- END NEW ---
+
         for i in range(self.tab_widget.count()):
-            if isinstance(editor := self.tab_widget.widget(i), EditorWidget) and self.editor_tabs_data.get(editor,
-                                                                                                           {}).get(
-                    'filepath') == norm_path:
-                self.tab_widget.setCurrentIndex(i)
-                return
+            widget = self.tab_widget.widget(i)
+            # Check if the widget is an editor and if its filepath matches.
+            # Avoids errors if a non-editor widget is open.
+            if isinstance(widget, EditorWidget):
+                tab_data = self.editor_tabs_data.get(widget, {})
+                if tab_data.get('filepath') == norm_path:
+                    self.tab_widget.setCurrentIndex(i)
+                    return
 
         if content is None:
             try:
@@ -558,7 +565,7 @@ class MainWindow(QMainWindow):
                 return
 
         self._action_open_file(norm_path)
-        QApplication.processEvents()  # Allow the new tab to be created
+        QApplication.processEvents()
         if isinstance(e := self.tab_widget.currentWidget(), EditorWidget) and self.editor_tabs_data.get(e, {}).get(
                 'filepath') == norm_path:
             e.goto_line_and_column(line, col)

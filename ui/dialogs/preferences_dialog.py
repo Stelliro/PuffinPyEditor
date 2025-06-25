@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWid
                              QDialogButtonBox, QFontComboBox, QSplitter, QFormLayout,
                              QListWidget, QListWidgetItem, QMessageBox, QGroupBox, QFileDialog,
                              QTreeWidget, QTreeWidgetItem, QHeaderView)
-from PyQt6.QtGui import QFont, QDesktopServices
+from PyQt6.QtGui import QFont, QDesktopServices, QColor
 from PyQt6.QtCore import Qt, QSize, pyqtSignal, QUrl
 
 if sys.platform == "win32":
@@ -226,20 +226,28 @@ class PreferencesDialog(QDialog):
         super().reject()
 
     def _create_appearance_tab(self):
-        tab, layout = QWidget(), QFormLayout();
-        tab.setLayout(layout);
-        layout.setContentsMargins(10, 10, 10, 10)
-        self.theme_combo = QComboBox();
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        theme_group = QGroupBox("Theming")
+        theme_layout = QFormLayout(theme_group)
+        self.theme_combo = QComboBox()
         self.edit_themes_button = QPushButton("Customize Themes...")
         self.edit_themes_button.clicked.connect(self._open_theme_editor_dialog)
-        self.font_family_combo = QFontComboBox();
-        self.font_size_spinbox = QSpinBox();
+        theme_layout.addRow("Theme:", self.theme_combo)
+        theme_layout.addRow("", self.edit_themes_button)
+        layout.addWidget(theme_group)
+        
+        font_group = QGroupBox("Editor Font")
+        font_layout = QFormLayout(font_group)
+        self.font_family_combo = QFontComboBox()
+        self.font_size_spinbox = QSpinBox()
         self.font_size_spinbox.setRange(6, 72)
-        layout.addRow("Theme:", self.theme_combo);
-        layout.addRow("", self.edit_themes_button);
-        layout.addRow(QLabel())
-        layout.addRow("Editor Font Family:", self.font_family_combo);
-        layout.addRow("Editor Font Size:", self.font_size_spinbox)
+        font_layout.addRow("Font Family:", self.font_family_combo)
+        font_layout.addRow("Font Size:", self.font_size_spinbox)
+        layout.addWidget(font_group)
+        
+        layout.addStretch()
         self.tab_widget.addTab(tab, "Appearance")
 
     def _repopulate_theme_combo(self):
@@ -258,53 +266,67 @@ class PreferencesDialog(QDialog):
         self.theme_editor_dialog_instance.exec()
 
     def _create_editor_tab(self):
-        tab, layout = QWidget(), QFormLayout();
-        tab.setLayout(layout);
-        layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        layout.addRow(QLabel("<b>Display</b>"));
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        display_group = QGroupBox("Display")
+        display_layout = QFormLayout(display_group)
+        display_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         self.show_line_numbers_checkbox = QCheckBox("Show line numbers")
-        self.word_wrap_checkbox = QCheckBox("Enable word wrap");
+        self.word_wrap_checkbox = QCheckBox("Enable word wrap")
         self.show_indent_guides_checkbox = QCheckBox("Show indentation guides")
-        layout.addRow(self.show_line_numbers_checkbox);
-        layout.addRow(self.word_wrap_checkbox);
-        layout.addRow(self.show_indent_guides_checkbox)
-        layout.addRow(QLabel());
-        layout.addRow(QLabel("<b>Indentation</b>"));
+        display_layout.addRow(self.show_line_numbers_checkbox)
+        display_layout.addRow(self.word_wrap_checkbox)
+        display_layout.addRow(self.show_indent_guides_checkbox)
+        layout.addWidget(display_group)
+
+        indent_group = QGroupBox("Indentation")
+        indent_layout = QFormLayout(indent_group)
         self.indent_style_combo = QComboBox()
-        self.indent_style_combo.addItems(["Spaces", "Tabs"]);
-        self.indent_width_spinbox = QSpinBox();
+        self.indent_style_combo.addItems(["Spaces", "Tabs"])
+        self.indent_width_spinbox = QSpinBox()
         self.indent_width_spinbox.setRange(1, 16)
-        layout.addRow("Indent Using:", self.indent_style_combo);
-        layout.addRow("Indent/Tab Width:", self.indent_width_spinbox)
-        layout.addRow(QLabel());
-        layout.addRow(QLabel("<b>File Handling</b>"));
+        indent_layout.addRow("Indent Using:", self.indent_style_combo)
+        indent_layout.addRow("Indent/Tab Width:", self.indent_width_spinbox)
+        layout.addWidget(indent_group)
+
+        file_group = QGroupBox("File Handling")
+        file_layout = QFormLayout(file_group)
         self.auto_save_checkbox = QCheckBox("Enable auto-save")
-        self.auto_save_delay_spinbox = QSpinBox();
-        self.auto_save_delay_spinbox.setRange(1, 60);
+        self.auto_save_delay_spinbox = QSpinBox()
+        self.auto_save_delay_spinbox.setRange(1, 60)
         self.auto_save_delay_spinbox.setSuffix(" seconds")
-        self.max_recent_files_spinbox = QSpinBox();
+        self.max_recent_files_spinbox = QSpinBox()
         self.max_recent_files_spinbox.setRange(1, 50)
-        layout.addRow(self.auto_save_checkbox);
-        layout.addRow("Auto-Save Delay:", self.auto_save_delay_spinbox);
-        layout.addRow("Max Recent Files:", self.max_recent_files_spinbox)
+        file_layout.addRow(self.auto_save_checkbox)
+        file_layout.addRow("Auto-Save Delay:", self.auto_save_delay_spinbox)
+        file_layout.addRow("Max Recent Files:", self.max_recent_files_spinbox)
+        layout.addWidget(file_group)
+        
+        layout.addStretch()
         self.tab_widget.addTab(tab, "Editor")
 
     def _create_run_tab(self):
-        tab, layout = QWidget(), QFormLayout();
-        tab.setLayout(layout);
-        layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        layout.addRow(QLabel("<b>Execution Environment</b>"));
-        path_layout = QHBoxLayout();
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        run_group = QGroupBox("Execution Environment")
+        run_layout = QFormLayout(run_group)
+        run_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
+        path_layout = QHBoxLayout()
         self.python_path_edit = QLineEdit()
-        browse_button = QPushButton("Browse...");
-        browse_button.clicked.connect(self._browse_for_python);
-        path_layout.addWidget(self.python_path_edit, 1);
+        browse_button = QPushButton("Browse...")
+        browse_button.clicked.connect(self._browse_for_python)
+        path_layout.addWidget(self.python_path_edit, 1)
         path_layout.addWidget(browse_button)
-        layout.addRow("Python Interpreter Path:", path_layout);
+        run_layout.addRow("Python Interpreter Path:", path_layout)
         info = QLabel("This interpreter is used for running scripts (F5) and code analysis.")
-        info.setWordWrap(True);
-        info.setStyleSheet("font-size: 9pt; color: grey;");
-        layout.addRow(info);
+        info.setWordWrap(True)
+        info.setStyleSheet("font-size: 9pt; color: grey;")
+        run_layout.addRow(info)
+        layout.addWidget(run_group)
+
+        layout.addStretch()
         self.tab_widget.addTab(tab, "Run")
 
     def _browse_for_python(self):
@@ -313,18 +335,23 @@ class PreferencesDialog(QDialog):
         if path: self.python_path_edit.setText(path)
 
     def _create_system_tab(self):
-        tab, layout = QWidget(), QFormLayout();
-        tab.setLayout(layout);
-        layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
-        layout.addRow(QLabel("<b>System Integration</b>"));
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        system_group = QGroupBox("System Integration")
+        system_layout = QFormLayout(system_group)
+        system_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapAllRows)
         self.run_in_background_checkbox = QCheckBox("Launch at startup and run in background")
         if sys.platform != "win32": self.run_in_background_checkbox.setEnabled(
             False); self.run_in_background_checkbox.setToolTip("This feature is only available on Windows.")
-        info = QLabel("Adds a tray icon that starts with Windows, allowing PuffinPyEditor to open faster.");
-        info.setWordWrap(True);
-        info.setStyleSheet("font-size: 9pt; color: grey;");
-        layout.addRow(self.run_in_background_checkbox);
-        layout.addRow(info);
+        info = QLabel("Adds a tray icon that starts with Windows, allowing PuffinPyEditor to open faster.")
+        info.setWordWrap(True)
+        info.setStyleSheet("font-size: 9pt; color: grey;")
+        system_layout.addRow(self.run_in_background_checkbox)
+        system_layout.addRow(info)
+        layout.addWidget(system_group)
+        
+        layout.addStretch()
         self.tab_widget.addTab(tab, "System")
 
     def _manage_startup_shortcut(self, create: bool):
@@ -382,9 +409,7 @@ class PreferencesDialog(QDialog):
         git_form_layout.addRow("Author Name:", self.git_user_name_edit);
         git_form_layout.addRow("Author Email:", self.git_user_email_edit)
 
-        branch_label = QLabel("Default Branch:");
-        branch_label.setAlignment(Qt.AlignmentFlag.AlignVCenter);
-        git_form_layout.addRow(branch_label, branch_btn_layout);
+        git_form_layout.addRow("Default Branch:", branch_btn_layout);
         top_layout.addWidget(git_group)
 
         build_group = QGroupBox("Build Tools");
@@ -396,9 +421,7 @@ class PreferencesDialog(QDialog):
         browse_nsis_button.clicked.connect(self._browse_for_nsis)
         nsis_path_layout.addWidget(self.nsis_path_edit, 1);
         nsis_path_layout.addWidget(browse_nsis_button)
-        nsis_label = QLabel("NSIS `makensis.exe` Path:");
-        nsis_label.setAlignment(Qt.AlignmentFlag.AlignVCenter);
-        build_form_layout.addRow(nsis_label, nsis_path_layout)
+        build_form_layout.addRow("NSIS `makensis.exe` Path:", nsis_path_layout)
         self.cleanup_build_checkbox = QCheckBox("Automatically clean up temporary build files")
         self.cleanup_build_checkbox.setToolTip("Deletes the 'build/' folder after a successful installer creation to save space.")
         build_form_layout.addRow("", self.cleanup_build_checkbox)
@@ -419,7 +442,6 @@ class PreferencesDialog(QDialog):
         branch_fix_button.clicked.connect(self.git_manager.set_default_branch_to_main)
 
     def _browse_for_nsis(self):
-        # --- FIX: Guide user to select the correct executable ---
         path, _ = QFileDialog.getOpenFileName(self, "Select makensis.exe (Command-Line Version)", "", "Executable (makensis.exe)")
         if path: self.nsis_path_edit.setText(path)
 
@@ -599,75 +621,137 @@ class PreferencesDialog(QDialog):
         self.repo_form_widget.hide()
 
     def _create_plugins_tab(self):
-        tab = QWidget();
+        tab = QWidget()
         layout = QVBoxLayout(tab)
-        remote_group = QGroupBox("Install New Plugins");
+        
+        remote_group = QGroupBox("Install New Plugins")
         remote_layout = QVBoxLayout(remote_group)
+        
         repo_layout = QHBoxLayout()
-        repo_label = QLabel("Plugin Distro Repo:");
+        repo_label = QLabel("Plugin Distro Repo:")
         repo_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         repo_layout.addWidget(repo_label)
         self.plugins_repo_edit = QLineEdit()
-        self.plugins_repo_edit.setPlaceholderText("user/repository");
+        self.plugins_repo_edit.setPlaceholderText("user/repository")
         self.fetch_plugins_button = QPushButton("Fetch")
-        repo_layout.addWidget(self.plugins_repo_edit, 1);
-        repo_layout.addWidget(self.fetch_plugins_button);
+        repo_layout.addWidget(self.plugins_repo_edit, 1)
+        repo_layout.addWidget(self.fetch_plugins_button)
         remote_layout.addLayout(repo_layout)
-        self.remote_plugins_tree = QTreeWidget();
-        self.remote_plugins_tree.setHeaderLabels(["Plugin", "Description"])
-        self.remote_plugins_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.remote_plugins_tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        remote_layout.addWidget(self.remote_plugins_tree);
+
+        self.remote_plugins_list = QListWidget() # Changed from QTreeWidget
+        remote_layout.addWidget(self.remote_plugins_list)
+
+        remote_buttons_layout = QHBoxLayout()
+        self.install_remote_button = QPushButton("Install Selected Plugin")
+        self.install_remote_button.setIcon(qta.icon('fa5s.download'))
+        self.install_remote_button.setEnabled(False)
         install_file_button = QPushButton("Install from File (.zip)...")
-        install_file_button.setIcon(qta.icon('fa5s.file-archive'));
-        remote_layout.addWidget(install_file_button, 0, Qt.AlignmentFlag.AlignRight)
-        layout.addWidget(remote_group, 1);
-        installed_group = QGroupBox("Installed Plugins");
+        install_file_button.setIcon(qta.icon('fa5s.file-archive'))
+        remote_buttons_layout.addStretch()
+        remote_buttons_layout.addWidget(self.install_remote_button)
+        remote_buttons_layout.addWidget(install_file_button)
+        remote_layout.addLayout(remote_buttons_layout)
+        
+        layout.addWidget(remote_group, 1)
+
+        installed_group = QGroupBox("Installed Plugins")
         installed_layout = QVBoxLayout(installed_group)
-        self.installed_plugins_list = QListWidget();
+        self.installed_plugins_list = QListWidget()
         self.uninstall_plugin_button = QPushButton("Uninstall Selected Plugin")
-        self.uninstall_plugin_button.setIcon(qta.icon('fa5s.trash-alt', color='crimson'));
+        self.uninstall_plugin_button.setIcon(qta.icon('fa5s.trash-alt', color='crimson'))
+        self.uninstall_plugin_button.setEnabled(False)
         installed_layout.addWidget(self.installed_plugins_list)
-        installed_layout.addWidget(self.uninstall_plugin_button, 0, Qt.AlignmentFlag.AlignRight);
+        installed_layout.addWidget(self.uninstall_plugin_button, 0, Qt.AlignmentFlag.AlignRight)
+        
         layout.addWidget(installed_group, 1)
-        self.tab_widget.addTab(tab, "Plugins");
+        self.tab_widget.addTab(tab, "Plugins")
+
         self.fetch_plugins_button.clicked.connect(self._fetch_remote_plugins)
-        install_file_button.clicked.connect(self._install_plugin_from_file);
+        install_file_button.clicked.connect(self._install_plugin_from_file)
+        self.install_remote_button.clicked.connect(self._install_selected_remote_plugin)
         self.uninstall_plugin_button.clicked.connect(self._uninstall_selected_plugin)
+        self.installed_plugins_list.currentItemChanged.connect(self._on_installed_plugin_selected)
+        self.remote_plugins_list.currentItemChanged.connect(self._on_remote_plugin_selected)
 
     def _populate_installed_plugins_list(self):
         self.installed_plugins_list.clear();
         plugins = self.plugin_manager.get_installed_plugins()
         for plugin in plugins:
-            item_text = f"{plugin.get('name', 'Unknown')} (v{plugin.get('version', 'N/A')})"
+            is_core = plugin.get("is_core", False)
+            name_suffix = " (Core Tool)" if is_core else ""
+            item_text = f"{plugin.get('name', 'Unknown')} v{plugin.get('version', 'N/A')}{name_suffix}"
+            
             list_item = QListWidgetItem(item_text);
             list_item.setToolTip(f"ID: {plugin.get('id')}\n{plugin.get('description')}")
-            list_item.setData(Qt.ItemDataRole.UserRole, plugin.get('id'));
+            list_item.setData(Qt.ItemDataRole.UserRole, plugin);
+            
+            if is_core:
+                list_item.setForeground(QColor("grey"))
+                
             self.installed_plugins_list.addItem(list_item)
+            
+    def _on_installed_plugin_selected(self, current_item: QListWidgetItem):
+        if not current_item:
+            self.uninstall_plugin_button.setEnabled(False)
+            return
+        
+        plugin_data = current_item.data(Qt.ItemDataRole.UserRole)
+        is_core = plugin_data.get("is_core", False)
+        self.uninstall_plugin_button.setEnabled(not is_core)
+        self.uninstall_plugin_button.setToolTip(
+            "Core plugins cannot be uninstalled." if is_core else "Uninstall the selected plugin."
+        )
+
+    def _on_remote_plugin_selected(self, current_item: QListWidgetItem):
+        if current_item is None:
+            self.install_remote_button.setEnabled(False)
+            return
+
+        # Check if the ItemIsEnabled flag is set and convert to a boolean
+        can_install = bool(current_item.flags() & Qt.ItemFlag.ItemIsEnabled)
+        self.install_remote_button.setEnabled(can_install)
 
     def _fetch_remote_plugins(self):
         repo_path = self.plugins_repo_edit.text().strip()
         if not repo_path or '/' not in repo_path: QMessageBox.warning(self, "Invalid Repo",
                                                                       "Enter a valid GitHub repo (user/repo)."); return
-        self.remote_plugins_tree.clear();
-        QTreeWidgetItem(self.remote_plugins_tree, ["Fetching..."]);
+        self.remote_plugins_list.clear()
+        self.remote_plugins_list.addItem("Fetching...");
         self.fetch_plugins_button.setEnabled(False)
+        self.install_remote_button.setEnabled(False)
         self.github_manager.fetch_plugin_index(repo_path)
 
     def _on_plugin_index_ready(self, plugin_list: list):
         self.fetch_plugins_button.setEnabled(True);
-        self.remote_plugins_tree.clear()
+        self.remote_plugins_list.clear()
         installed_ids = {p['id'] for p in self.plugin_manager.get_installed_plugins()}
+        
         for plugin_info in plugin_list:
-            name, desc = plugin_info.get("name", "Unknown"), plugin_info.get("description", "")
-            item = QTreeWidgetItem(self.remote_plugins_tree, [name, desc])
-            if plugin_info.get('id') in installed_ids:
-                item.setText(0, f"{name} (Installed)"); item.setDisabled(True)
-            else:
-                install_button = QPushButton("Install");
-                install_button.clicked.connect(
-                    lambda ch, url=plugin_info.get("download_url"): self._install_plugin_from_url(url))
-                self.remote_plugins_tree.setItemWidget(item, 0, install_button)
+            name = plugin_info.get("name", "Unknown")
+            version = plugin_info.get("version", "N/A")
+            is_installed = plugin_info.get('id') in installed_ids
+            
+            item_text = f"{name} v{version}"
+            if is_installed:
+                item_text += " (Installed)"
+
+            list_item = QListWidgetItem(item_text)
+            list_item.setToolTip(plugin_info.get("description", "No description available."))
+            list_item.setData(Qt.ItemDataRole.UserRole, plugin_info)
+            
+            if is_installed:
+                list_item.setFlags(list_item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                list_item.setForeground(QColor("grey"))
+
+            self.remote_plugins_list.addItem(list_item)
+
+    def _install_selected_remote_plugin(self):
+        current_item = self.remote_plugins_list.currentItem()
+        if not current_item:
+            return
+        plugin_info = current_item.data(Qt.ItemDataRole.UserRole)
+        download_url = plugin_info.get("download_url")
+        self._install_plugin_from_url(download_url)
 
     def _install_plugin_from_url(self, url: str):
         if not url: QMessageBox.critical(self, "Error", "Plugin has no download URL."); return
@@ -699,9 +783,18 @@ class PreferencesDialog(QDialog):
             QMessageBox.critical(self, "Uninstall Failed", message)
 
     def _uninstall_selected_plugin(self):
-        if not (current_item := self.installed_plugins_list.currentItem()): QMessageBox.warning(self, "No Selection",
-                                                                                                "Please select a plugin to uninstall."); return
-        plugin_id = current_item.data(Qt.ItemDataRole.UserRole)
+        current_item = self.installed_plugins_list.currentItem()
+        if not current_item: 
+            QMessageBox.warning(self, "No Selection", "Please select a plugin to uninstall.")
+            return
+            
+        plugin_data = current_item.data(Qt.ItemDataRole.UserRole)
+        plugin_id = plugin_data.get('id')
+        
+        if plugin_data.get("is_core", False):
+            QMessageBox.information(self, "Cannot Uninstall", "This is a core plugin and cannot be uninstalled.")
+            return
+
         if QMessageBox.question(self, "Confirm Uninstall",
                                 f"Uninstall '{current_item.text()}'?") == QMessageBox.StandardButton.Yes:
             success, message = self.plugin_manager.uninstall_plugin(plugin_id)

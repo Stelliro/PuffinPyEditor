@@ -17,7 +17,8 @@ class PluginManager:
         base_path = get_base_path()
 
         self.plugins_directory = os.path.join(base_path, "plugins")
-        log.info(f"Plugin search directory set to: {self.plugins_directory}")
+        self.core_tools_directory = os.path.join(base_path, "core_debug_tools")
+        log.info(f"Plugin search directories set to: {self.plugins_directory} and {self.core_tools_directory}")
 
         self.loaded_plugins = {}
         self.installed_plugins_metadata = []
@@ -28,41 +29,61 @@ class PluginManager:
 
     def discover_and_load_plugins(self):
         """
-        Discovers and loads all user-facing plugins from the /plugins directory.
-        It intentionally ignores core debug tools and the obsolete framework.
+        Discovers and loads all plugins from the /plugins directory.
+        It also discovers metadata for core tools but does not load them.
         """
-        log.info("Starting standard plugin discovery...")
+        log.info("Starting plugin discovery...")
         self.installed_plugins_metadata = []
-        try:
-            # Add 'plugin_creator_framework' to the exclusion list as a safeguard
-            # in case the user does not delete the old folder.
-            core_tool_ids = {'plugin_creator_framework', 'debug_framework', 'enhanced_exceptions', 'live_log_viewer'}
-            plugin_folders = [d for d in os.listdir(self.plugins_directory) if
-                              os.path.isdir(os.path.join(self.plugins_directory, d)) and not d.startswith('__')
-                              and d not in core_tool_ids]
-
-        except FileNotFoundError:
-            log.error(f"Plugins directory not found at '{self.plugins_directory}'. Cannot load any plugins.")
-            return
-
-        # The rest of the function does not need changes, as the core API framework
-        # is no longer its responsibility. It will now only load standard plugins.
         plugins_to_load = {}
-        for item_name in plugin_folders:
-            manifest_path = os.path.join(self.plugins_directory, item_name, "plugin.json")
-            if not os.path.exists(manifest_path):
-                continue
-            try:
-                with open(manifest_path, 'r', encoding='utf-8') as f:
-                    manifest = json.load(f)
 
-                plugin_id = manifest.get('id', item_name)
-                manifest['id'] = plugin_id
-                self.installed_plugins_metadata.append(manifest)
-                plugins_to_load[item_name] = manifest
-            except (json.JSONDecodeError, IOError) as e:
-                log.error(f"Failed to read manifest for '{item_name}': {e}")
+        # Discover and process regular, user-installable plugins
+        try:
+            plugin_folders = [d for d in os.listdir(self.plugins_directory) if
+                              os.path.isdir(os.path.join(self.plugins_directory, d)) and not d.startswith('__')]
 
+            for item_name in plugin_folders:
+                manifest_path = os.path.join(self.plugins_directory, item_name, "plugin.json")
+                if not os.path.exists(manifest_path):
+                    continue
+                try:
+                    with open(manifest_path, 'r', encoding='utf-8') as f:
+                        manifest = json.load(f)
+
+                    plugin_id = manifest.get('id', item_name)
+                    manifest['id'] = plugin_id
+                    manifest['is_core'] = True # Mark all built-in plugins as core/non-deletable
+                    self.installed_plugins_metadata.append(manifest)
+                    plugins_to_load[item_name] = manifest
+                except (json.JSONDecodeError, IOError) as e:
+                    log.error(f"Failed to read manifest for plugin '{item_name}': {e}")
+        except FileNotFoundError:
+            log.error(f"Plugins directory not found at '{self.plugins_directory}'.")
+
+        # Discover metadata for core debug tools (for UI listing only)
+        try:
+            if os.path.isdir(self.core_tools_directory):
+                tool_folders = [d for d in os.listdir(self.core_tools_directory) if
+                                os.path.isdir(os.path.join(self.core_tools_directory, d)) and not d.startswith('__')]
+
+                for item_name in tool_folders:
+                    manifest_path = os.path.join(self.core_tools_directory, item_name, "plugin.json")
+                    if not os.path.exists(manifest_path):
+                        continue
+                    try:
+                        with open(manifest_path, 'r', encoding='utf-8') as f:
+                            manifest = json.load(f)
+                        plugin_id = manifest.get('id', item_name)
+                        manifest['id'] = plugin_id
+                        manifest['is_core'] = True
+                        self.installed_plugins_metadata.append(manifest)
+                        # NOTE: We do NOT add these to `plugins_to_load`. They are loaded separately.
+                    except (json.JSONDecodeError, IOError) as e:
+                        log.error(f"Failed to read manifest for core tool '{item_name}': {e}")
+        except FileNotFoundError:
+            log.warning(f"Core debug tools directory not found at '{self.core_tools_directory}'.")
+
+
+        # Load the regular plugins
         for item_name, manifest in plugins_to_load.items():
             try:
                 if self._validate_manifest(manifest, item_name):
@@ -104,7 +125,6 @@ class PluginManager:
             spec.loader.exec_module(module)
 
             if hasattr(module, 'initialize'):
-                # Pass the CORE API to the plugin.
                 instance = module.initialize(self.main_window)
                 self.loaded_plugins[plugin_id] = {
                     "module": module,
@@ -145,7 +165,11 @@ class PluginManager:
             return False, f"An unexpected error occurred: {e}"
 
     def uninstall_plugin(self, plugin_id: str) -> tuple[bool, str]:
-        if plugin_id == 'plugin_creator_framework': return False, "The core Plugin Creator Framework cannot be uninstalled."
+        # Check if the plugin is marked as core from its manifest
+        plugin_meta = next((p for p in self.installed_plugins_metadata if p.get('id') == plugin_id), None)
+        if plugin_meta and plugin_meta.get('is_core'):
+            return False, "This is a core plugin and cannot be uninstalled."
+
         target_path = os.path.join(self.plugins_directory, plugin_id)
         if not os.path.exists(target_path): return False, f"Plugin '{plugin_id}' not found."
         try:

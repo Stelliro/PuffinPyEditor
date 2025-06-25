@@ -3,16 +3,15 @@ import os
 from PyQt6.QtWidgets import QMessageBox
 from PyQt6.QtCore import Qt
 from ui.editor_widget import EditorWidget
-# --- FIX: Changed relative imports to absolute ---
-from code_runner import CodeRunner
+from app_core.code_runner import CodeRunner # Use the core runner
 from output_panel import OutputPanel
-# --- END FIX ---
 
 
 class PythonRunnerPlugin:
     def __init__(self, main_window):
         self.api = main_window.puffin_api
         self.main_window = self.api.get_main_window()
+        # Use the centralized code runner from the core application
         self.code_runner = CodeRunner()
         self.output_panel = OutputPanel(self.main_window)
         self._setup_ui()
@@ -41,10 +40,12 @@ class PythonRunnerPlugin:
         if not filepath:
             if QMessageBox.question(self.main_window, "Save Required", "File must be saved to be executed.",
                                     QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel) == QMessageBox.StandardButton.Save:
+                # Use the main window's save_as action which returns a boolean
                 if not self.main_window._action_save_as(): return
                 filepath = self.main_window.editor_tabs_data.get(editor, {}).get('filepath')
             else:
                 return
+        # If the file is modified (dirty), save it before running.
         elif hash(editor.get_text()) != self.main_window.editor_tabs_data[editor]['original_hash']:
             self.main_window._action_save_file()
 

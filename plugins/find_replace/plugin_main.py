@@ -1,5 +1,5 @@
 # PuffinPyEditor/plugins/find_replace/plugin_main.py
-from search_replace_dialog import SearchReplaceDialog  # CORRECTED: Removed the leading '.'
+from search_replace_dialog import SearchReplaceDialog
 from ui.editor_widget import EditorWidget
 
 
@@ -28,7 +28,8 @@ class FindReplacePlugin:
 
     def on_tab_changed(self, index):
         # Enable/disable the action based on whether the current tab is an editor
-        is_editor = isinstance(self.main_window.tab_widget.widget(index), EditorWidget)
+        widget = self.main_window.tab_widget.widget(index)
+        is_editor = isinstance(widget, EditorWidget)
         self.find_action.setEnabled(is_editor)
 
 

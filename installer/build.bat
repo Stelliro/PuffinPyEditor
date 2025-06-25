@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 echo.
 echo  ================================================
-echo     PuffinPyEditor Build Script (v11 - Hardened)
+echo     PuffinPyEditor Build Script (v12 - Assets Fix)
 echo  ================================================
 echo.
 
@@ -47,9 +47,9 @@ goto :arg_loop
 REM --- Step 1: Read Version ---
 if defined VERSION_OVERRIDE (
     set "APP_VERSION=!VERSION_OVERRIDE!"
-    echo [1/5] Using version from command line: !APP_VERSION!
+    echo [1/6] Using version from command line: !APP_VERSION!
 ) else (
-    echo [1/5] Reading application version from file...
+    echo [1/6] Reading application version from file...
     if not exist "!VERSION_FILE!" (
         echo [FATAL ERROR] !VERSION_FILE! not found.
         exit /b 1
@@ -62,36 +62,45 @@ echo.
 REM --- Step 2: Bundle Main Application (Optimized & Robust) ---
 if exist "!FINAL_EXE!" goto :skip_main_bundle
 
-echo [2/5] Bundling MAIN application (PuffinPyEditor.exe)...
+echo [2/6] Bundling MAIN application (PuffinPyEditor.exe)...
 call pyinstaller !MAIN_SPEC! --noconfirm
 if errorlevel 1 exit /b 1
 echo   - Main application bundled successfully.
 goto :after_main_bundle
 
 :skip_main_bundle
-echo [2/5] Skipping MAIN application bundle (already exists).
+echo [2/6] Skipping MAIN application bundle (already exists).
 
 :after_main_bundle
 echo.
 
 
 REM --- Step 3: Bundle Tray Application ---
-echo [3/5] Bundling TRAY application (PuffinPyTray.exe)...
+echo [3/6] Bundling TRAY application (PuffinPyTray.exe)...
 call pyinstaller !TRAY_SPEC! --noconfirm --distpath "!FINAL_DIR!"
 if errorlevel 1 exit /b 1
 echo   - Tray application bundled successfully.
 echo.
 
 REM --- Step 4: Bundle Log Viewer ---
-echo [4/5] Bundling LOG VIEWER application (log_viewer.exe)...
+echo [4/6] Bundling LOG VIEWER application (log_viewer.exe)...
 call pyinstaller !LOG_VIEWER_SPEC! --noconfirm --distpath "!FINAL_DIR!"
 if errorlevel 1 exit /b 1
 echo   - Log viewer bundled successfully.
 echo.
 
+REM --- Step 5: Copy Assets ---
+echo [5/6] Copying application assets...
+xcopy "assets" "!FINAL_DIR!\assets\" /E /I /Y /Q
+if errorlevel 1 (
+    echo [FATAL ERROR] Failed to copy assets folder.
+    exit /b 1
+)
+echo   - Assets copied successfully.
+echo.
 
-REM --- Step 5: Create Installer ---
-echo [5/5] Generating assets and compiling installer...
+REM --- Step 6: Create Installer ---
+echo [6/6] Generating assets and compiling installer...
 call python "installer\create_icon.py"
 if errorlevel 1 exit /b 1
 

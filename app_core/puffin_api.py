@@ -87,6 +87,20 @@ class PuffinPluginAPI:
             self._main_window.view_menu.addSeparator()
             self._main_window.view_menu.addAction(dock.toggleViewAction())
         log.info(f"Registered panel '{title}'")
+    
+    def register_file_opener(self, extension: str, handler_func: Callable):
+        """
+        Registers a function to handle opening files with a specific extension.
+        The handler function will receive the full filepath as its only argument.
+
+        Args:
+            extension: The file extension to handle (e.g., '.md', '.csv').
+            handler_func: The function to call when a file with this extension is opened.
+        """
+        if not extension.startswith('.'):
+            extension = '.' + extension
+        self._main_window.file_open_handlers[extension.lower()] = handler_func
+        log.info(f"Registered custom opener for '{extension}' files.")
 
     def show_message(self, level: str, title: str, text: str):
         level_map = {'info': QMessageBox.Icon.Information, 'warning': QMessageBox.Icon.Warning,

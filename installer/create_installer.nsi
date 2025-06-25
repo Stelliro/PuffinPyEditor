@@ -1,5 +1,5 @@
 ; PuffinPyEditor NSIS Installer Script
-; Version 4 - Corrected InstallDirRegKey command
+; Version 5 - Corrected Section Definitions
 
 ;--------------------------------
 ; Includes
@@ -21,6 +21,14 @@
   !define VERSION "1.0.0" ; Fallback version
 !endif
 
+; --- FIX: Define Section IDs ---
+; These IDs are used by the Section Description macros before the sections themselves are declared.
+; This resolves the "unknown variable/constant" warnings during compilation.
+!define SEC_CORE "1"
+!define SEC_STARTMENU "2"
+!define SEC_DESKTOP "3"
+!define SEC_TRAY "4"
+
 ;--------------------------------
 ; MUI Settings
 !define MUI_ICON "assets\PuffinPyEditor.ico"
@@ -35,7 +43,7 @@
 Name "${APP_NAME} ${VERSION}"
 OutFile "..\dist\${APP_NAME}_v${VERSION}_Setup.exe"
 InstallDir "$PROGRAMFILES64\${APP_NAME}"
-InstallDirRegKey HKCU "${REG_KEY}" "" ; <-- CORRECTED COMMAND
+InstallDirRegKey HKCU "${REG_KEY}" ""
 RequestExecutionLevel admin
 
 ;--------------------------------

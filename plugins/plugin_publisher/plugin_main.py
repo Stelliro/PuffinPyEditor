@@ -1,10 +1,12 @@
 # PuffinPyEditor/plugins/plugin_publisher/plugin_main.py
 from publish_dialog import PublishDialog
 
+
 class PluginPublisherPlugin:
     """
     Integrates the plugin publishing tool into the main application UI.
     """
+
     def __init__(self, main_window):
         self.main_window = main_window
         self.api = main_window.puffin_api
@@ -19,8 +21,8 @@ class PluginPublisherPlugin:
         )
         self.update_action_state()
 
-        # If a login/logout signal were available from the API, we would connect it here
-        # to call self.update_action_state automatically. For now, it's checked on-click.
+        # Connect to the auth manager's signals if they were available
+        # e.g., self.api.get_manager("github").auth_changed.connect(self.update_action_state)
 
     def show_publish_dialog(self):
         """
@@ -36,16 +38,14 @@ class PluginPublisherPlugin:
                 "Please log in via Preferences > Source Control."
             )
             return
-        
+
         # Lazily create the dialog instance
-        if self.publish_dialog is None:
+        if self.publish_dialog is None or not self.publish_dialog.isVisible():
             self.publish_dialog = PublishDialog(self.api, self.main_window)
-        elif self.publish_dialog.isVisible():
+            self.publish_dialog.show()
+        else:
             self.publish_dialog.raise_()
             self.publish_dialog.activateWindow()
-            return
-
-        self.publish_dialog.show()
 
     def update_action_state(self):
         """
@@ -59,6 +59,7 @@ class PluginPublisherPlugin:
                 "Upload an installed plugin to your distribution repository." if is_logged_in
                 else "Please log in to GitHub in Preferences to use this feature."
             )
+
 
 def initialize(main_window):
     """Entry point for PuffinPyEditor to initialize the plugin."""
