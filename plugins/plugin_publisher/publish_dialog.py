@@ -5,9 +5,8 @@ import tempfile
 import json
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QFormLayout, QComboBox,
                              QTextEdit, QPushButton, QDialogButtonBox, QLabel,
-                             QMessageBox, QWidget, QHBoxLayout)
+                             QMessageBox, QHBoxLayout)
 from PyQt6.QtGui import QFont
-from PyQt6.QtCore import Qt
 
 # --- Content for auto-initializing a distro repo ---
 README_CONTENT = """# PuffinPyEditor Plugin Distribution Repository
@@ -28,6 +27,7 @@ GITIGNORE_CONTENT = """# Ignore common temp files
 venv/
 .venv/
 """
+
 
 class PublishDialog(QDialog):
     """A dialog to manage the process of publishing a plugin."""
@@ -78,7 +78,7 @@ class PublishDialog(QDialog):
 
         self.button_box = QDialogButtonBox()
         self.publish_button = self.button_box.addButton("Publish", QDialogButtonBox.ButtonRole.AcceptRole)
-        self.close_button = self.button_box.addButton(QDialogButtonBox.StandardButton.Close)
+        self.close_button = self.button_box.addButton("Close", QDialogButtonBox.ButtonRole.RejectRole)
         layout.addWidget(self.button_box)
 
     def _connect_ui_signals(self):
@@ -109,7 +109,7 @@ class PublishDialog(QDialog):
         self._populate_repos()
         can_publish = bool(self.repo_combo.count() > 0 and self.plugin_selector.count() > 0)
         self.publish_button.setEnabled(can_publish)
-        self.publish_button.setToolTip("Select a plugin and configure your distribution repo in Preferences."
+        self.publish_button.setToolTip("Select a plugin and configure your distribution repo."
                                        if not can_publish else "")
         self.log_output.clear()
 
@@ -139,7 +139,8 @@ class PublishDialog(QDialog):
 
     def _on_plugin_selected(self):
         plugin_data = self.plugin_selector.currentData()
-        if not plugin_data: return
+        if not plugin_data:
+            return
         commit_msg = f"feat(plugin): Publish {plugin_data['name']} v{plugin_data['version']}"
         self.commit_message.setText(commit_msg)
 
@@ -162,7 +163,8 @@ class PublishDialog(QDialog):
         self.distro_repo_path = f"{repo_data.get('owner')}/{repo_data.get('repo')}"
 
         if not all([repo_data, self.plugin_data, self.commit_message.toPlainText()]):
-            QMessageBox.warning(self, "Missing Information", "Please select a plugin and distribution repo, and provide a commit message.")
+            QMessageBox.warning(self, "Missing Information", "Please select a plugin, "
+                                                             "a distribution repo, and provide a commit message.")
             return
 
         self._set_ui_locked(True)
@@ -174,24 +176,24 @@ class PublishDialog(QDialog):
         self._current_step = "CLONE"
         self._add_log(f"Cloning '{self.distro_repo_path}'...")
         repo_url = f"https://github.com/{self.distro_repo_path}.git"
-        self.git_manager.clone_repo(repo_url, self._temp_dir) # No branch specified
+        self.git_manager.clone_repo(repo_url, self._temp_dir)
 
     def _on_git_step_success(self, message: str, data: dict):
         if self._current_step == "CLONE":
             self.cloned_repo_path = data.get("path")
             self._add_log(f"Successfully cloned repository to {self.cloned_repo_path}")
-            # Check if repo is empty and needs initialization
             if not os.path.exists(os.path.join(self.cloned_repo_path, "index.json")):
                 self._current_step = "INITIALIZE_COMMIT"
-                self._add_log("Empty repository detected. Initializing with default structure...")
+                self._add_log("Empty repository detected. Initializing structure...")
                 self._initialize_distro_repo()
-                self.git_manager.commit_files(self.cloned_repo_path, "ci: Initialize plugin distribution repository")
+                self.git_manager.commit_files(self.cloned_repo_path,
+                                              "ci: Initialize plugin distribution repository")
             else:
                 self._package_and_commit_plugin()
 
         elif self._current_step == "INITIALIZE_COMMIT":
             self._add_log("Initial commit successful.")
-            self._package_and_commit_plugin() # Now package the actual plugin
+            self._package_and_commit_plugin()
 
         elif self._current_step == "PUBLISH_COMMIT":
             self._add_log(f"Commit successful. {message}")
@@ -201,7 +203,7 @@ class PublishDialog(QDialog):
 
         elif self._current_step == "PUSH":
             self._add_log("Push successful!")
-            self._add_log(f"\n--- PUBLICATION COMPLETE ---")
+            self._add_log("\n--- PUBLICATION COMPLETE ---")
             self._cleanup(success=True)
 
     def _package_and_commit_plugin(self):
@@ -215,12 +217,15 @@ class PublishDialog(QDialog):
 
     def _initialize_distro_repo(self):
         try:
-            with open(os.path.join(self.cloned_repo_path, 'index.json'), 'w') as f: json.dump([], f)
-            with open(os.path.join(self.cloned_repo_path, 'README.md'), 'w') as f: f.write(README_CONTENT)
-            with open(os.path.join(self.cloned_repo_path, '.gitignore'), 'w') as f: f.write(GITIGNORE_CONTENT)
+            with open(os.path.join(self.cloned_repo_path, 'index.json'), 'w') as f:
+                json.dump([], f)
+            with open(os.path.join(self.cloned_repo_path, 'README.md'), 'w') as f:
+                f.write(README_CONTENT)
+            with open(os.path.join(self.cloned_repo_path, '.gitignore'), 'w') as f:
+                f.write(GITIGNORE_CONTENT)
             os.makedirs(os.path.join(self.cloned_repo_path, 'zips'), exist_ok=True)
-            # Create a gitkeep file so the empty `zips` directory is committed
-            with open(os.path.join(self.cloned_repo_path, 'zips', '.gitkeep'), 'w') as f: pass
+            with open(os.path.join(self.cloned_repo_path, 'zips', '.gitkeep'), 'w') as f:
+                pass
         except Exception as e:
             self._on_publish_failed(f"Error initializing distro repo files: {e}")
             raise
@@ -230,26 +235,31 @@ class PublishDialog(QDialog):
             self._add_log(f"Packaging '{self.plugin_data['name']}' as a .zip file...")
             plugin_id = self.plugin_data['id']
             zip_filename = f"{plugin_id}.zip"
-            plugin_source_path = os.path.join(self.plugin_manager.plugins_directory, plugin_id)
+            plugin_source_path = os.path.join(self.plugin_manager.user_plugins_directory, plugin_id)
+            if not os.path.exists(plugin_source_path):
+                plugin_source_path = os.path.join(self.plugin_manager.built_in_plugins_dir, plugin_id)
+
             zips_dir_in_repo = os.path.join(self.cloned_repo_path, 'zips')
             final_zip_path = os.path.join(zips_dir_in_repo, zip_filename)
-            shutil.make_archive(os.path.join(zips_dir_in_repo, plugin_id), 'zip', plugin_source_path)
+            shutil.make_archive(os.path.splitext(final_zip_path)[0], 'zip', plugin_source_path)
 
             self._add_log("Updating index.json...")
             index_path = os.path.join(self.cloned_repo_path, 'index.json')
             index_data = []
             if os.path.exists(index_path):
-                with open(index_path, 'r', encoding='utf-8') as f: index_data = json.load(f)
+                with open(index_path, 'r', encoding='utf-8') as f:
+                    index_data = json.load(f)
 
-            download_url = f"https://raw.githubusercontent.com/{self.distro_repo_path}/main/{os.path.relpath(final_zip_path, self.cloned_repo_path)}".replace("\\", "/")
+            rel_zip_path = os.path.join('zips', zip_filename).replace("\\", "/")
+            download_url = f"https://raw.githubusercontent.com/{self.distro_repo_path}/main/{rel_zip_path}"
             new_entry = {k: self.plugin_data.get(k) for k in ('id', 'name', 'author', 'version', 'description')}
             new_entry['download_url'] = download_url
-            found = any(entry.get('id') == plugin_id for entry in index_data)
-            
-            if found: index_data = [new_entry if entry.get('id') == plugin_id else entry for entry in index_data]
-            else: index_data.append(new_entry)
 
-            with open(index_path, 'w', encoding='utf-8') as f: json.dump(index_data, f, indent=4)
+            index_data = [entry for entry in index_data if entry.get('id') != plugin_id]
+            index_data.append(new_entry)
+
+            with open(index_path, 'w', encoding='utf-8') as f:
+                json.dump(index_data, f, indent=4)
         except Exception as e:
             self._add_log(f"Error during local packaging: {e}", is_error=True)
             raise

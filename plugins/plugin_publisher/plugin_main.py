@@ -1,5 +1,5 @@
 # PuffinPyEditor/plugins/plugin_publisher/plugin_main.py
-from publish_dialog import PublishDialog
+from .publish_dialog import PublishDialog
 
 
 class PluginPublisherPlugin:
@@ -21,14 +21,14 @@ class PluginPublisherPlugin:
         )
         self.update_action_state()
 
-        # Connect to the auth manager's signals if they were available
-        # e.g., self.api.get_manager("github").auth_changed.connect(self.update_action_state)
+        # Connect to the github manager's auth signal to update action state
+        self.api.get_manager("github").auth_successful.connect(lambda user: self.update_action_state())
+        self.api.get_manager("github").auth_failed.connect(lambda err: self.update_action_state())
 
     def show_publish_dialog(self):
         """
         Checks for authentication and then shows the publishing dialog.
         """
-        # Check for GitHub login status before showing the dialog
         github_manager = self.api.get_manager("github")
         if not github_manager or not github_manager.get_authenticated_user():
             self.api.show_message(

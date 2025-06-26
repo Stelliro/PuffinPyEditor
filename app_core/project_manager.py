@@ -168,12 +168,13 @@ class ProjectManager:
             instructions or "No specific instructions were provided.", "```",
             "\n## 📜 AI Guidelines & Rules", "```text",
         ]
-        output_lines.extend([f"- {g}" for g in guidelines] if guidelines else ["No specific guidelines were provided."])
+        guideline_text = "\n".join([f"- {g}" for g in guidelines]) if guidelines else "No specific guidelines were provided."
+        output_lines.append(guideline_text)
         output_lines.extend(["```", "---"])
 
-        # NEW: Add Golden Rules section
         output_lines.append("\n## ✨ Golden Rules\n```text")
-        output_lines.extend([f"{i+1}. {g}" for i, g in enumerate(golden_rules)] if golden_rules else ["No specific golden rules were provided."])
+        golden_rules_text = "\n".join([f"{i+1}. {g}" for i, g in enumerate(golden_rules)]) if golden_rules else "No specific golden rules were provided."
+        output_lines.append(golden_rules_text)
         output_lines.extend(["```", "---"])
 
         output_lines.append("\n## 🗂️ File Tree of Included Files:\n```")
@@ -196,7 +197,8 @@ class ProjectManager:
                 output_lines.append("#### Linter Issues Found:")
                 output_lines.append("```")
                 for problem in all_problems[norm_filepath]:
-                    output_lines.append(f"- Line {problem['line']}, Col {problem['col']} ({problem['code']}): {problem['description']}")
+                    output_lines.append(f"- Line {problem['line']}, Col {problem['col']} "
+                                        f"({problem['code']}): {problem['description']}")
                 output_lines.append("```\n")
 
             output_lines.append(f"```{language}")
@@ -212,7 +214,8 @@ class ProjectManager:
         try:
             with open(output_filepath, 'w', encoding='utf-8') as f:
                 f.write("\n".join(output_lines))
-            return True, f"Project exported to {Path(output_filepath).name}. Included {file_count} files."
+            return True, f"Project exported to {Path(output_filepath).name}. " \
+                   f"Included {file_count} files."
         except IOError as e:
             log.error(f"Failed to write AI export file: {e}", exc_info=True)
             return False, f"Failed to write export file: {e}"

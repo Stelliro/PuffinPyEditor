@@ -9,9 +9,7 @@ from typing import List, Dict, Any, Tuple
 # Adjust these paths if your project structure changes
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 THEMES_DIR = os.path.join(ROOT_DIR, "assets", "themes")
-BUILT_IN_THEMES_FILE = os.path.join(THEMES_DIR, "themes.json")
 CUSTOM_THEMES_FILE = os.path.join(THEMES_DIR, "custom_themes.json")
-THEME_SCHEMA_FILE = os.path.join(THEMES_DIR, "theme_schema.json")
 THEME_MANAGER_FILE = os.path.join(ROOT_DIR, "app_core", "theme_manager.py")
 
 
@@ -59,12 +57,6 @@ def validate_json_syntax() -> Tuple[Dict, List[str]]:
     all_themes = {}
     all_errors = []
 
-    # Validate built-in themes
-    built_in_data, errors = _load_json_file(BUILT_IN_THEMES_FILE)
-    all_errors.extend(errors)
-    if built_in_data:
-        all_themes.update(built_in_data)
-
     # Validate custom themes (if they exist)
     custom_data, errors = _load_json_file(CUSTOM_THEMES_FILE)
     all_errors.extend(errors)
@@ -75,33 +67,6 @@ def validate_json_syntax() -> Tuple[Dict, List[str]]:
         print(f"{bcolors.OKGREEN}All theme files are valid JSON.{bcolors.ENDC}")
 
     return all_themes, all_errors
-
-
-def validate_theme_schemas(all_themes: Dict, schema_file: str) -> List[str]:
-    """Validates each theme against the defined JSON schema."""
-    _print_header("2. Theme Schema Validation")
-
-    schema, errors = _load_json_file(schema_file)
-    if errors:
-        return errors
-
-    all_errors = []
-
-    for theme_id, theme_data in all_themes.items():
-        try:
-            jsonschema.validate(instance=theme_data, schema=schema)
-        except jsonschema.exceptions.ValidationError as e:
-            # Provide a more user-friendly error message
-            error_path = " -> ".join(map(str, e.path))
-            error_msg = (f"Theme '{bcolors.BOLD}{theme_id}{bcolors.ENDC}' "
-                         f"failed at '{bcolors.WARNING}{error_path}{bcolors.ENDC}"
-                         f"':\n  {bcolors.FAIL}{e.message}{bcolors.ENDC}")
-            errors.append(error_msg)
-
-    if not all_errors:
-        print(f"{bcolors.OKGREEN}All themes conform to schema.{bcolors.ENDC}")
-
-    return all_errors
 
 
 def get_required_color_keys_from_code(manager_file: str) -> set:
@@ -123,7 +88,7 @@ def get_required_color_keys_from_code(manager_file: str) -> set:
 
 def validate_key_completeness(all_themes: Dict, required_keys: set) -> List[str]:
     """Checks if each theme defines all the keys required by the app."""
-    _print_header("3. Color Key Completeness Validation")
+    _print_header("2. Color Key Completeness Validation")
     all_errors = []
 
     if not required_keys:
@@ -158,7 +123,6 @@ def main():
     print(f"{bcolors.BOLD}Running PuffinPyEditor Asset Validator..."
           f"{bcolors.ENDC}")
 
-    # 1. Syntax Check
     all_themes, errors = validate_json_syntax()
     if errors:
         for error in errors:
@@ -167,10 +131,6 @@ def main():
               f"Cannot continue.{bcolors.ENDC}")
         return
 
-    # 2. Schema Check
-    errors = validate_theme_schemas(all_themes, THEME_SCHEMA_FILE)
-
-    # 3. Completeness Check
     required_keys = get_required_color_keys_from_code(THEME_MANAGER_FILE)
     errors.extend(validate_key_completeness(all_themes, required_keys))
 

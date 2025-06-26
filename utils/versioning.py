@@ -2,10 +2,10 @@
 import os
 from packaging import version
 from .logger import log
+from .helpers import get_base_path
 
-# This should point to the root of the PuffinPyEditor project.
-# We go up two levels from /utils/
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# This will now correctly find the project root whether running from source or frozen.
+ROOT_DIR = get_base_path()
 VERSION_FILE_PATH = os.path.join(ROOT_DIR, "VERSION.txt")
 
 
@@ -25,8 +25,8 @@ def get_current_version() -> str:
     except FileNotFoundError:
         log.error(f"VERSION.txt not found at: {VERSION_FILE_PATH}")
         return "0.0.0"
-    except (version.InvalidVersion, ValueError) as e:
-        log.error(f"VERSION.txt contains an invalid version string: {e}")
+    except (version.InvalidVersion, ValueError, IOError) as e:
+        log.error(f"Could not read or parse VERSION.txt: {e}")
         return "0.0.0"
 
 
@@ -52,7 +52,6 @@ def suggest_next_version() -> str:
     except version.InvalidVersion:
         return "v1.0.0"
 
-# --- NEW FUNCTION ---
 def write_new_version(new_version_string: str) -> bool:
     """
     Writes a new version string to the VERSION.txt file after validation.

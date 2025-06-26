@@ -26,7 +26,7 @@ def get_app_data_path() -> str:
     else:  # Linux and other systems
         # e.g., /home/<user>/.local/share/PuffinPyEditorProject/PuffinPyEditor
         path = os.path.join(os.path.expanduser('~/.local/share'), ORG_NAME, APP_NAME)
-    
+
     return path
 
 
@@ -72,7 +72,6 @@ def setup_logger(name: str = "PuffinPyEditor",
         logger.addHandler(fh)
     except Exception as e:
         logger.error(f"Failed to create file handler for logging: {e}", exc_info=False)
-
 
     logger.info(f"Logger initialized. Log file at: {LOG_FILE}")
     return logger

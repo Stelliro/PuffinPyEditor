@@ -10,7 +10,8 @@ class OutputPanel(QDockWidget):
     def __init__(self, parent=None):
         super().__init__("Output", parent)
         self.setObjectName("OutputPanelDock")
-        self.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea |
+                             Qt.DockWidgetArea.RightDockWidgetArea)
 
         self.container_widget = QWidget()
         self.layout = QVBoxLayout(self.container_widget)
@@ -58,4 +59,5 @@ class OutputPanel(QDockWidget):
         colors = theme_manager.current_theme_data.get("colors", {})
         bg_color = colors.get("editor.background", "#1e1e1e")
         fg_color = colors.get("editor.foreground", "#d4d4d4")
-        self.output_text_edit.setStyleSheet(f"background-color: {bg_color}; color: {fg_color}; border: none;")
+        self.output_text_edit.setStyleSheet(f"background-color: {bg_color}; "
+                                              f"color: {fg_color}; border: none;")

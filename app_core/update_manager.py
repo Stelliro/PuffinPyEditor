@@ -72,11 +72,12 @@ class UpdateManager(QObject):
                     if asset.get("name", "").lower().endswith(".zip"):
                         result["download_url"] = asset.get("browser_download_url")
                         break
-                
+
                 if result["download_url"]:
                     self.update_check_finished.emit(result)
                 else:
-                    log.warning("New version found, but no suitable .zip asset was available for download.")
+                    log.warning("New version found, but no suitable .zip asset "
+                                "was available for download.")
                     self.update_check_finished.emit({"update_available": False})
             else:
                 log.info("Application is up to date.")

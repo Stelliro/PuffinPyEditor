@@ -1,4 +1,4 @@
-# PuffinPyEditor/plugins/debug_framework/debug_window.py
+# PuffinPyEditor/core_debug_tools/debug_framework/debug_window.py
 from typing import Type
 from PyQt6.QtWidgets import QMainWindow, QTabWidget, QWidget
 from PyQt6.QtCore import QSize

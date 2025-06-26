@@ -1,10 +1,9 @@
 # PuffinPyEditor/ui/file_tree_view.py
 import os
-import shutil
 from functools import partial
 from PyQt6.QtWidgets import QTreeView, QMessageBox, QMenu, QInputDialog
-from PyQt6.QtGui import QFileSystemModel, QAction
-from PyQt6.QtCore import QDir, Qt, pyqtSignal, QModelIndex, QPoint, QMimeData
+from PyQt6.QtGui import QFileSystemModel
+from PyQt6.QtCore import QDir, Qt, pyqtSignal, QModelIndex, QPoint
 import qtawesome as qta
 from utils.logger import log
 from app_core.file_handler import FileHandler
@@ -60,7 +59,8 @@ class FileTreeViewWidget(QTreeView):
         index = self.indexAt(position)
         menu = QMenu()
         clicked_path = self.file_system_model.filePath(index) if index.isValid() else self.file_system_model.rootPath()
-        if not clicked_path: return
+        if not clicked_path:
+            return
 
         target_dir = clicked_path if os.path.isdir(clicked_path) else os.path.dirname(clicked_path)
 
@@ -115,4 +115,3 @@ class FileTreeViewWidget(QTreeView):
             success, error = self.file_handler.delete_item(path)
             if not success:
                 QMessageBox.warning(self, "Error", error)
-

@@ -1,0 +1,7 @@
+{
+    "id": "debug_framework",
+    "name": "Debug Tools Framework",
+    "author": "AI Assistant",
+    "version": "1.0.0",
+    "description": "Provides a core framework and UI for debugging plugins. Other debug tools can register themselves with this framework."
+}

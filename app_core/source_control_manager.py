@@ -27,7 +27,8 @@ class GitWorker(QObject):
                 email = cr.get_value('user', 'email')
             return git.Actor(name, email)
         except (configparser.NoSectionError, configparser.NoOptionError):
-            self.error_occurred.emit("Git user config is missing. Please set it in Preferences > Source Control.")
+            self.error_occurred.emit("Git user config is missing. Please set it in "
+                                     "Preferences > Source Control.")
             return None
 
     def get_git_config(self):
@@ -73,7 +74,8 @@ class GitWorker(QObject):
                 elif not repo.head.is_valid():
                     summaries[path] = {'branch': '(no commits)', 'commit': 'N/A'}
                 else:
-                    summaries[path] = {'branch': repo.active_branch.name, 'commit': repo.head.commit.hexsha[:7]}
+                    summaries[path] = {'branch': repo.active_branch.name,
+                                       'commit': repo.head.commit.hexsha[:7]}
             except InvalidGitRepositoryError:
                 pass
             except Exception as e:
@@ -89,7 +91,8 @@ class GitWorker(QObject):
             untracked = repo.untracked_files
             self.status_ready.emit(staged, unstaged + untracked, repo_path)
         except (InvalidGitRepositoryError, ValueError) as e:
-            self.error_occurred.emit(f"Git Status for '{os.path.basename(repo_path)}' failed: {e}")
+            self.error_occurred.emit(f"Git Status for "
+                                     f"'{os.path.basename(repo_path)}' failed: {e}")
 
     def commit_files(self, repo_path: str, message: str):
         try:
@@ -103,7 +106,8 @@ class GitWorker(QObject):
                 repo.index.commit(message, author=author, committer=author)
                 self.operation_success.emit("Changes committed", {'repo_path': repo_path})
             else:
-                self.operation_success.emit("No new changes to commit.", {'repo_path': repo_path, 'no_changes': True})
+                self.operation_success.emit("No new changes to commit.",
+                                            {'repo_path': repo_path, 'no_changes': True})
         except GitCommandError as e:
             self.error_occurred.emit(f"Git Commit failed: {e}")
 
@@ -165,7 +169,8 @@ class GitWorker(QObject):
                 log.info("No commits found. Creating initial commit for release.")
                 if repo.is_dirty(untracked_files=True):
                     repo.git.add(A=True)
-                    repo.index.commit("Initial commit for release", author=author, committer=author)
+                    repo.index.commit("Initial commit for release",
+                                      author=author, committer=author)
                 else:
                     self.error_occurred.emit("Cannot tag an empty project with no files.")
                     return
@@ -232,7 +237,8 @@ class GitWorker(QObject):
                 if not author:
                     return
                 repo.git.add(A=True)
-                repo.index.commit("Initial commit after linking to remote", author=author, committer=author)
+                repo.index.commit("Initial commit after linking to remote",
+                                  author=author, committer=author)
             self.operation_success.emit(f"Successfully linked to {remote_url}", {})
         except GitCommandError as e:
             self.error_occurred.emit(f"Failed to link repository: {e}")
@@ -244,7 +250,8 @@ class GitWorker(QObject):
             repo.git.branch('-M', 'master', 'main')
             repo.git.push('--force', '-u', 'origin', 'main')
             repo.git.push('origin', '--delete', 'master')
-            self.operation_success.emit("'main' is now the primary branch.", {'repo_path': repo_path})
+            self.operation_success.emit("'main' is now the primary branch.",
+                                        {'repo_path': repo_path})
         except GitCommandError as e:
             self.error_occurred.emit(f"Failed to fix branch mismatch: {e}")
 
@@ -366,5 +373,6 @@ class SourceControlManager(QObject):
             log.info("Shutting down SourceControlManager thread.")
             self.thread.quit()
             if not self.thread.wait(3000):
-                log.warning("SourceControlManager thread did not shut down gracefully. Terminating.")
+                log.warning("SourceControlManager thread did not shut down "
+                            "gracefully. Terminating.")
                 self.thread.terminate()

@@ -17,8 +17,8 @@ def find_python_interpreter_for_jedi() -> str:
 
     The priority is:
     1. User-defined path in settings.
-    2. The python.exe from the current venv (if running from source).
-    3. A python.exe bundled alongside the main PuffinPyEditor.exe.
+    2. A 'python.exe' bundled alongside the main PuffinPyEditor.exe (when frozen).
+    3. The python.exe from the current venv (if running from source).
     4. The first 'python' found on the system's PATH.
 
     Returns:
@@ -31,14 +31,7 @@ def find_python_interpreter_for_jedi() -> str:
         log.info(f"Jedi: Using user-defined interpreter: {user_path}")
         return user_path
 
-    # 2. When running from source, sys.executable is the venv python.
-    # When frozen, sys.executable is PuffinPyEditor.exe, which we must avoid.
-    if not getattr(sys, 'frozen', False):
-        log.info("Jedi: Running from source, using sys.executable: "
-                 f"{sys.executable}")
-        return sys.executable
-
-    # 3. If the application is frozen (bundled with PyInstaller)
+    # 2. If the application is frozen (bundled with PyInstaller)
     if getattr(sys, 'frozen', False):
         # Look for 'python.exe' in the same directory as our main executable.
         frozen_dir = os.path.dirname(sys.executable)
@@ -48,9 +41,17 @@ def find_python_interpreter_for_jedi() -> str:
                      f"{local_python_path}")
             return local_python_path
 
+    # 3. When running from source, sys.executable is the venv python.
+    # When frozen, sys.executable is PuffinPyEditor.exe, which we must avoid.
+    if not getattr(sys, 'frozen', False):
+        if "PuffinPyEditor.exe" not in sys.executable:
+            log.info("Jedi: Running from source, using sys.executable: "
+                     f"{sys.executable}")
+            return sys.executable
+
     # 4. As a last resort, search the system's PATH.
     system_python = shutil.which("python")
-    if system_python:
+    if system_python and "PuffinPyEditor.exe" not in system_python:
         log.warning("Jedi: Falling back to system python on PATH: "
                     f"{system_python}")
         return system_python
@@ -89,8 +90,8 @@ class JediWorker(QObject):
                          f"interpreter: {python_executable}")
             else:
                 # Fallback to a default project if no path is given
-                default_sys_path = [os.path.dirname(python_executable)]
-                self.project = jedi.get_default_project(sys_path=default_sys_path)
+                env = jedi.create_environment(python_executable, safe=False)
+                self.project = jedi.Project(os.path.expanduser("~"), environment=env)
                 log.info("Jedi context set to default environment with "
                          f"interpreter: {python_executable}")
 
@@ -146,7 +147,11 @@ class JediWorker(QObject):
             self.signature_ready.emit(signatures[0] if signatures else None)
         except Exception as e:
             log.error(f"Error getting Jedi signature: {e}", exc_info=False)
-            self.signature_ready.emit(None)
+            try:
+                self.signature_ready.emit(None)
+            except RuntimeError:
+                log.warning("JediWorker was likely deleted during an exception. "
+                            "Ignoring signal emit error.")
 
 
 class CompletionManager(QObject):
@@ -229,9 +234,8 @@ class CompletionManager(QObject):
             """
             if docstring:
                 tooltip_html += f"""
-                    <div style='border-top: 1px solid {border};
-                                margin-top: 6px; padding-top: 6px;
-                                color: {doc_fg};'>
+                    <hr style='border-color: {border}; border-style: solid; margin: 6px 0;' />
+                    <div style='color: {doc_fg};'>
                         {doc_html}
                     </div>
                 """

@@ -354,8 +354,8 @@ class GitHubManager(QObject):
     def create_repo(self, name: str, description: str, is_private: bool):
         self._request_create_repo.emit(name, description, is_private)
 
-    def create_release(self, owner: str, repo: str, tag_name: str, name: str,
-                       body: str, prerelease: bool):
+    def create_github_release(self, owner: str, repo: str, tag_name: str, name: str,
+                              body: str, prerelease: bool):
         self._request_create_release.emit(owner, repo, tag_name, name, body,
                                           prerelease)
 

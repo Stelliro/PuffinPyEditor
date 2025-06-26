@@ -29,6 +29,7 @@ DEFAULT_SETTINGS = {
     "auto_save_enabled": False,
     "auto_save_delay_seconds": 3,
     "max_recent_files": 15,
+    "favorites": [],
 
     # --- Project State ---
     "open_projects": [],
@@ -45,13 +46,18 @@ DEFAULT_SETTINGS = {
     "ai_export_loadouts": {},
     "ai_export_golden_rules": {
         "Default Golden Rules": [
-            "Do not remove any code that is unrelated to the fix, only remove code if it is being substituted or is not needed anymore.",
-            "Only edit and add features, the only features should stay unless asked to be removed, or may be completely redundant.",
+            "Do not remove any code that is unrelated to the fix, only remove "
+            "code if it is being substituted or is not needed anymore.",
+            "Only edit and add features, the only features should stay unless "
+            "asked to be removed, or may be completely redundant.",
             "any scripts over 1000 lines, please write in a new response.",
-            "multiple scripts together exceeding 2000 lines together need to be separated into smaller responses, (example: these scripts have 2340 lines together I'm going to separate it into 2 messages that way i dont lose formatting and dont accidentally remove any features)"
+            "multiple scripts together exceeding 2000 lines together need to be "
+            "separated into smaller responses, (example: these scripts have "
+            "2340 lines together I'm going to separate it into 2 messages "
+            "that way i dont lose formatting and dont accidentally remove "
+            "any features)"
         ]
     },
-    # NEW SETTING
     "cleanup_after_build": True,
     "nsis_path": ""
 }
@@ -84,11 +90,13 @@ class SettingsManager:
                 settings.update(loaded_settings)
                 return settings
             else:
-                log.info(f"Settings file not found. Creating with defaults at: {self.settings_file}")
+                log.info(f"Settings file not found. Creating with defaults "
+                         f"at: {self.settings_file}")
                 self._save_settings(DEFAULT_SETTINGS.copy())
                 return DEFAULT_SETTINGS.copy()
         except (json.JSONDecodeError, IOError) as e:
-            log.error(f"Error loading settings: {e}. Reverting to defaults.", exc_info=True)
+            log.error(f"Error loading settings: {e}. Reverting to defaults.",
+                      exc_info=True)
             return DEFAULT_SETTINGS.copy()
 
     def _save_settings(self, settings_data: Dict[str, Any]):
@@ -102,7 +110,8 @@ class SettingsManager:
             # Atomic move/rename
             os.replace(temp_file, self.settings_file)
         except IOError as e:
-            log.error(f"Error saving settings to {self.settings_file}: {e}", exc_info=True)
+            log.error(f"Error saving settings to {self.settings_file}: {e}",
+                      exc_info=True)
 
     def get(self, key: str, default: Any = None) -> Any:
         """

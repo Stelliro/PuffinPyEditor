@@ -1,7 +1,6 @@
 # /plugins/markdown_viewer/markdown_widget.py
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTextBrowser
 from PyQt6.QtGui import QFont
-from PyQt6.QtCore import Qt
 from markdown import markdown
 from app_core.theme_manager import theme_manager
 from app_core.settings_manager import settings_manager

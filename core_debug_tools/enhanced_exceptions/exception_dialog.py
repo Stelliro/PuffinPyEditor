@@ -11,6 +11,8 @@ from utils.versioning import APP_VERSION
 
 
 class ExceptionDialog(QDialog):
+    """A dialog to display unhandled exceptions with developer-friendly actions."""
+
     def __init__(self, exc_type, exc_value, exc_tb, parent=None):
         super().__init__(parent)
         self.setWindowTitle("PuffinPyEditor - Unhandled Exception")
@@ -65,12 +67,15 @@ class ExceptionDialog(QDialog):
         layout.addWidget(self.button_box)
 
     def _copy_to_clipboard(self):
+        """Copies the full report to the clipboard."""
         QApplication.clipboard().setText(self.full_report_display)
         self.details_box.selectAll()
 
     def _open_github_issues(self):
+        """Opens a new issue on GitHub with pre-filled information."""
         issue_title = quote_plus(f"Crash Report: {self.exception_type}")
 
+        # The multi-line string's content should not have leading space
         issue_body_template = f"""
 **Describe the bug**
 A clear and concise description of what the bug is. What were you doing when the crash occurred?
@@ -79,21 +84,13 @@ A clear and concise description of what the bug is. What were you doing when the
 Steps to reproduce the behavior:
 1. Go to '...'
 2. Click on '....'
-3. Scroll down to '....'
-4. See error
+3. See error
 
 **Automatic Crash Report Details**
 
 ---
 <details>
-<summary>System Information & Traceback</summary>
-
-```
-{self.full_report_display}
-```
-</details>
 """
-
         issue_body = quote_plus(issue_body_template.strip())
 
         url = QUrl(f"https://github.com/Stelliro/PuffinPyEditor/issues/new?title={issue_title}&body={issue_body}")

@@ -1,8 +1,7 @@
 # PuffinPyEditor/ui/line_number_area.py
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtGui import QPainter, QColor, QFontMetrics
-from PyQt6.QtCore import Qt, QSize
-from utils.logger import log
+from PyQt6.QtCore import QSize
+
 
 class LineNumberArea(QWidget):
     def __init__(self, editor):

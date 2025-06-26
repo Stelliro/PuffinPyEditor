@@ -2,60 +2,78 @@
 import os
 import json
 import base64
+import shutil
 from typing import Dict, Any, Optional
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QColor
 
 from app_core.settings_manager import settings_manager
-from utils.logger import log
+from utils.logger import log, get_app_data_path
 from utils.helpers import get_base_path
 
-# SVG path data for icons. This removes dependencies for simple UI elements.
-# Path data extracted from a standard icon set (e.g., Font Awesome).
+# Correct, valid SVG path data for simple arrow/chevron icons.
 SVG_ARROW_PATHS = {
-    'up': "M24.707 20.293l-12-12c-0.391-0.391-1.024-0.391-1.414 0l-12 12c-0.391 0.391-0.391 1.024 0 1.414s1.024 0.391 1.414 0l11.293-11.293 11.293 11.293c0.391 0.391 1.024 0.391 1.414 0s0.391-1.023 0-1.414z",
-    'down': "M24.707 11.293l-12 12c-0.391 0.391-1.024-0.391-1.414 0l-12-12c-0.391-0.391-0.391-1.024 0-1.414s1.024-0.391 1.414 0l11.293 11.293 11.293-11.293c0.391-0.391 1.024-0.391 1.414 0s0.391 1.023 0 1.414z"
+    'up': "M4 10 L8 6 L12 10",
+    'down': "M4 6 L8 10 L12 6"
 }
 
-# Use the robust path helper for EXE compatibility
-CUSTOM_THEMES_FILE_PATH = os.path.join(get_base_path(), "assets", "themes", "custom_themes.json")
+# --- Paths for themes ---
+APP_BASE_PATH = get_base_path()
+APP_DATA_ROOT = get_app_data_path()
+CUSTOM_THEMES_FILE_PATH = os.path.join(APP_DATA_ROOT, "custom_themes.json")
+DEFAULT_CUSTOM_THEMES_FILE_PATH = os.path.join(APP_BASE_PATH, "assets",
+                                               "themes", "custom_themes.json")
 
 BUILT_IN_THEMES = {
     "puffin_dark": {
-        "name": "Puffin Dark", "author": "PuffinPy", "type": "dark",
-        "colors": {"window.background": "#2f383e", "sidebar.background": "#2a3338", "editor.background": "#272e33",
-                   "editor.foreground": "#d3c6aa", "editorGutter.background": "#2f383e",
-                   "editorGutter.foreground": "#5f6c6d", "editor.lineHighlightBackground": "#3a4145",
-                   "editor.matchingBracketBackground": "#545e62", "editor.matchingBracketForeground": "#d3c6aa",
-                   "menu.background": "#3a4145", "menu.foreground": "#d3c6aa", "statusbar.background": "#282f34",
-                   "statusbar.foreground": "#d3c6aa", "tab.activeBackground": "#272e33",
-                   "tab.inactiveBackground": "#2f383e", "tab.activeForeground": "#d3c6aa",
-                   "tab.inactiveForeground": "#5f6c6d", "button.background": "#424d53", "button.foreground": "#d3c6aa",
-                   "input.background": "#3a4145", "input.foreground": "#d3c6aa", "input.border": "#5f6c6d",
-                   "scrollbar.background": "#2f383e", "scrollbar.handle": "#424d53", "scrollbar.handleHover": "#545e62",
-                   "scrollbar.handlePressed": "#545e62", "accent": "#83c092", "syntax.keyword": "#e67e80",
-                   "syntax.operator": "#d3c6aa", "syntax.brace": "#d3c6aa", "syntax.decorator": "#dbbc7f",
-                   "syntax.self": "#e67e80", "syntax.className": "#dbbc7f", "syntax.functionName": "#83c092",
-                   "syntax.comment": "#5f6c6d", "syntax.string": "#a7c080", "syntax.docstring": "#5f6c6d",
-                   "syntax.number": "#d699b6"}
+        "name": "Puffin Dark", "author": "PuffinPy", "type": "dark", "is_custom": False,
+        "colors": {
+            "window.background": "#2f383e", "sidebar.background": "#2a3338",
+            "editor.background": "#272e33", "editor.foreground": "#d3c6aa",
+            "editorGutter.background": "#2f383e", "editorGutter.foreground": "#5f6c6d",
+            "editor.lineHighlightBackground": "#3a4145",
+            "editor.matchingBracketBackground": "#545e62",
+            "editor.matchingBracketForeground": "#d3c6aa", "menu.background": "#3a4145",
+            "menu.foreground": "#d3c6aa", "statusbar.background": "#282f34",
+            "statusbar.foreground": "#d3c6aa", "tab.activeBackground": "#272e33",
+            "tab.inactiveBackground": "#2f383e", "tab.activeForeground": "#d3c6aa",
+            "tab.inactiveForeground": "#5f6c6d", "button.background": "#424d53",
+            "button.foreground": "#d3c6aa", "input.background": "#3a4145",
+            "input.foreground": "#d3c6aa", "input.border": "#5f6c6d",
+            "scrollbar.background": "#2f383e", "scrollbar.handle": "#424d53",
+            "scrollbar.handleHover": "#545e62", "scrollbar.handlePressed": "#545e62",
+            "accent": "#83c092", "syntax.keyword": "#e67e80", "syntax.operator": "#d3c6aa",
+            "syntax.brace": "#d3c6aa", "syntax.decorator": "#dbbc7f",
+            "syntax.self": "#e67e80", "syntax.className": "#dbbc7f",
+            "syntax.functionName": "#83c092", "syntax.comment": "#5f6c6d",
+            "syntax.string": "#a7c080", "syntax.docstring": "#5f6c6d",
+            "syntax.number": "#d699b6"
+        }
     },
     "puffin_light": {
-        "name": "Puffin Light", "author": "PuffinPy", "type": "light",
-        "colors": {"window.background": "#f5f5f5", "sidebar.background": "#ECECEC", "editor.background": "#ffffff",
-                   "editor.foreground": "#000000", "editorGutter.background": "#f5f5f5",
-                   "editorGutter.foreground": "#505050", "editor.lineHighlightBackground": "#e0e8f0",
-                   "editor.matchingBracketBackground": "#c0c8d0", "editor.matchingBracketForeground": "#000000",
-                   "menu.background": "#e0e0e0", "menu.foreground": "#000000", "statusbar.background": "#007acc",
-                   "statusbar.foreground": "#ffffff", "tab.activeBackground": "#ffffff",
-                   "tab.inactiveBackground": "#f5f5f5", "tab.activeForeground": "#000000",
-                   "tab.inactiveForeground": "#555555", "button.background": "#E0E0E0", "button.foreground": "#000000",
-                   "input.background": "#ffffff", "input.foreground": "#000000", "input.border": "#D0D0D0",
-                   "scrollbar.background": "#f0f0f0", "scrollbar.handle": "#cccccc", "scrollbar.handleHover": "#bbbbbb",
-                   "scrollbar.handlePressed": "#aaaaaa", "accent": "#007ACC", "syntax.keyword": "#0000ff",
-                   "syntax.operator": "#000000", "syntax.brace": "#a00050", "syntax.decorator": "#267f99",
-                   "syntax.self": "#800080", "syntax.className": "#267f99", "syntax.functionName": "#795e26",
-                   "syntax.comment": "#008000", "syntax.string": "#a31515", "syntax.docstring": "#a31515",
-                   "syntax.number": "#098658"}
+        "name": "Puffin Light", "author": "PuffinPy", "type": "light", "is_custom": False,
+        "colors": {
+            "window.background": "#f5f5f5", "sidebar.background": "#ECECEC",
+            "editor.background": "#ffffff", "editor.foreground": "#000000",
+            "editorGutter.background": "#f5f5f5", "editorGutter.foreground": "#505050",
+            "editor.lineHighlightBackground": "#e0e8f0",
+            "editor.matchingBracketBackground": "#c0c8d0",
+            "editor.matchingBracketForeground": "#000000", "menu.background": "#e0e0e0",
+            "menu.foreground": "#000000", "statusbar.background": "#007acc",
+            "statusbar.foreground": "#ffffff", "tab.activeBackground": "#ffffff",
+            "tab.inactiveBackground": "#f5f5f5", "tab.activeForeground": "#000000",
+            "tab.inactiveForeground": "#555555", "button.background": "#E0E0E0",
+            "button.foreground": "#000000", "input.background": "#ffffff",
+            "input.foreground": "#000000", "input.border": "#D0D0D0",
+            "scrollbar.background": "#f0f0f0", "scrollbar.handle": "#cccccc",
+            "scrollbar.handleHover": "#bbbbbb", "scrollbar.handlePressed": "#aaaaaa",
+            "accent": "#007ACC", "syntax.keyword": "#0000ff", "syntax.operator": "#000000",
+            "syntax.brace": "#a00050", "syntax.decorator": "#267f99",
+            "syntax.self": "#800080", "syntax.className": "#267f99",
+            "syntax.functionName": "#795e26", "syntax.comment": "#008000",
+            "syntax.string": "#a31515", "syntax.docstring": "#a31515",
+            "syntax.number": "#098658"
+        }
     }
 }
 
@@ -67,9 +85,10 @@ def get_arrow_svg_uri(direction: str, color: str) -> str:
         log.warning(f"Invalid arrow direction '{direction}' requested for SVG.")
         return ""
 
+    # Correctly generates a stroke-based chevron icon.
     svg_content = (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 32 32">'
-        f'<path fill="{color}" d="{path_data}" />'
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">'
+        f'<path stroke="{color}" stroke-width="2" stroke-linecap="round" fill="none" d="{path_data}" />'
         '</svg>'
     )
     b64_content = base64.b64encode(svg_content.encode('utf-8')).decode('utf-8')
@@ -92,7 +111,7 @@ class ThemeManager:
         last_theme_id = settings_manager.get("last_theme_id", "puffin_dark")
 
         if last_theme_id not in self.all_themes_data:
-            log.warning(f"Last used theme '{last_theme_id}' not found. Reverting to default.")
+            log.warning(f"Last used theme '{last_theme_id}' not found. Reverting.")
             last_theme_id = "puffin_dark"
             settings_manager.set("last_theme_id", last_theme_id)
 
@@ -100,25 +119,42 @@ class ThemeManager:
         self.current_theme_data = self.all_themes_data.get(self.current_theme_id, {})
 
     def _load_all_themes(self) -> Dict[str, Dict]:
-        """Loads themes from built-in dictionary and custom JSON file."""
+        """
+        Loads themes from the built-in dictionary and the user's custom JSON file.
+        """
         all_themes = BUILT_IN_THEMES.copy()
+
+        if not os.path.exists(CUSTOM_THEMES_FILE_PATH):
+            log.info(f"User custom themes file not found at {CUSTOM_THEMES_FILE_PATH}.")
+            if os.path.exists(DEFAULT_CUSTOM_THEMES_FILE_PATH):
+                try:
+                    log.info("Copying default custom themes to user data directory.")
+                    os.makedirs(os.path.dirname(CUSTOM_THEMES_FILE_PATH), exist_ok=True)
+                    shutil.copy2(DEFAULT_CUSTOM_THEMES_FILE_PATH, CUSTOM_THEMES_FILE_PATH)
+                except Exception as e:
+                    log.error(f"Failed to copy default custom themes: {e}")
+
         if os.path.exists(CUSTOM_THEMES_FILE_PATH):
             try:
                 with open(CUSTOM_THEMES_FILE_PATH, 'r', encoding='utf-8') as f:
-                    custom_themes = json.load(f)
-                    all_themes.update(custom_themes)
-            except (json.JSONDecodeError, IOError) as e:
-                log.error(f"Error loading custom themes: {e}")
+                    custom_themes_data = json.load(f)
+                    for theme_data in custom_themes_data.values():
+                        theme_data['is_custom'] = True
+                    all_themes.update(custom_themes_data)
+            except Exception as e:
+                log.error(f"Error loading user custom themes: {e}")
+
         return all_themes
 
     def _save_custom_themes(self):
-        """Saves only the themes marked as custom to the JSON file."""
+        """Saves only the themes marked as custom to the user-writable JSON file."""
         custom_themes = {
             theme_id: data for theme_id, data in self.all_themes_data.items()
             if data.get("is_custom")
         }
         temp_file = CUSTOM_THEMES_FILE_PATH + ".tmp"
         try:
+            os.makedirs(os.path.dirname(CUSTOM_THEMES_FILE_PATH), exist_ok=True)
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(custom_themes, f, indent=4)
             os.replace(temp_file, CUSTOM_THEMES_FILE_PATH)
@@ -128,7 +164,7 @@ class ThemeManager:
 
     def add_or_update_custom_theme(self, theme_id: str, theme_data: Dict):
         """Adds or updates a theme, ensuring it's marked as custom."""
-        theme_data['is_custom'] = True  # Ensure it's always marked as custom
+        theme_data['is_custom'] = True
         self.all_themes_data[theme_id] = theme_data
         self._save_custom_themes()
 
@@ -173,7 +209,6 @@ class ThemeManager:
 
         def adjust_color(hex_str: str, factor: int) -> str:
             color = QColor(hex_str)
-            # Factors > 100 lighten, < 100 darken
             return color.lighter(factor).name() if factor > 100 else color.darker(factor).name()
 
         accent = c('accent', '#83c092')

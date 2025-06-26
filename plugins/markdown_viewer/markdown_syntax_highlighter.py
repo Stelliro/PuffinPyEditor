@@ -16,8 +16,7 @@ class MarkdownSyntaxHighlighter(QSyntaxHighlighter):
     def initialize_formats_and_rules(self):
         colors = theme_manager.current_theme_data.get("colors", {})
         editor_bg = QColor(colors.get('editor.background', '#2b2b2b'))
-        
-        # --- Define Formats ---
+
         self.formats['marker'] = QTextCharFormat()
         self.formats['marker'].setForeground(editor_bg.lighter(130))
         self.formats['marker'].setFontWeight(QFont.Weight.Bold)
@@ -37,30 +36,27 @@ class MarkdownSyntaxHighlighter(QSyntaxHighlighter):
 
         self.formats['bold'] = QTextCharFormat()
         self.formats['bold'].setFontWeight(QFont.Weight.Bold)
-        
+
         self.formats['italic'] = QTextCharFormat()
         self.formats['italic'].setFontItalic(True)
 
-        # --- NEW: Strikethrough format ---
         self.formats['strikethrough'] = QTextCharFormat()
         self.formats['strikethrough'].setFontStrikeOut(True)
 
         self.formats['code_block'] = QTextCharFormat()
         self.formats['code_block'].setBackground(QColor(colors.get('editor.lineHighlightBackground', '#323232')))
         self.formats['code_block'].setFontFamily("Consolas")
-        
+
         self.formats['inline_code'] = QTextCharFormat()
         self.formats['inline_code'].setBackground(QColor(colors.get('editor.lineHighlightBackground', '#323232')))
         self.formats['inline_code'].setForeground(QColor(colors.get('syntax.string', '#a7c080')))
         self.formats['inline_code'].setFontFamily("Consolas")
 
-        # --- Define Rules (order matters) ---
         self.rules = [
             (QRegularExpression(r"^(#{1,3})\s"), self._format_heading),
             (QRegularExpression(r"(\*\*)([^\*]+)(\*\*)"), self._format_inline('bold')),
             (QRegularExpression(r"(\*)([^\*]+)(\*)"), self._format_inline('italic')),
             (QRegularExpression(r"(`)([^`]+)(`)"), self._format_inline('inline_code')),
-            # --- NEW: Strikethrough rule ---
             (QRegularExpression(r"(~~)([^~]+)(~~)"), self._format_inline('strikethrough')),
         ]
         self.code_block_delimiter = QRegularExpression(r"^```")
@@ -82,7 +78,7 @@ class MarkdownSyntaxHighlighter(QSyntaxHighlighter):
         if self.code_block_delimiter.match(text).hasMatch() or self.previousBlockState() == 1:
             self.setFormat(0, len(text), self.formats['code_block'])
             in_code_block = True
-            
+
             if self.code_block_delimiter.match(text).hasMatch() and self.previousBlockState() == 1:
                 in_code_block = False
 

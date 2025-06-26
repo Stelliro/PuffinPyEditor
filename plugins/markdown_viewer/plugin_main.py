@@ -1,6 +1,6 @@
 # /plugins/markdown_viewer/plugin_main.py
 import os
-from markdown_editor_widget import MarkdownEditorWidget
+from .markdown_editor_widget import MarkdownEditorWidget
 from utils.logger import log
 
 

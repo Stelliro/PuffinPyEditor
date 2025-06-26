@@ -6,3 +6,5 @@ GitPython
 winshell
 pywin32
 Markdown
+flake8
+jsonschema

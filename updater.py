@@ -101,7 +101,7 @@ def main():
         log("Unzipping update...")
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(temp_extract_dir)
-        
+
         # Check if the zip contains a single root folder
         extracted_content = os.listdir(temp_extract_dir)
         source_dir = temp_extract_dir
@@ -112,18 +112,14 @@ def main():
                 source_dir = possible_root
 
         log(f"Replacing files in '{install_dir}' using safe copy method.")
-        
-        # --- THIS IS THE KEY CHANGE ---
-        # Instead of a blind copytree, use our safe copy function.
+
         safe_copy(source_dir, install_dir)
-        # --- END OF KEY CHANGE ---
 
         log("Update successfully installed.")
 
     except Exception as e:
         log(f"Error: Failed during installation. {e}")
         log("Attempting to restore from backup...")
-        # (Restore logic could be added here if needed)
         return
 
     finally:

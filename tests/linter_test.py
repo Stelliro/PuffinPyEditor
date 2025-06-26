@@ -28,7 +28,7 @@ class BadStyle:
         self.value = val
 
     # F821: undefined name 'some_undefined_variable'
-    # This is a runtime error, but not a fatal syntax error, so it should be detected alongside style issues.
+    # This is a runtime error, but not a fatal syntax error, so it should be detected.
     def use_undefined_name(self):
         # The following line would cause a NameError. It is commented out to
         # make this test file runnable, but flake8 will still report F821.
@@ -41,10 +41,10 @@ print("first statement");
 print("second statement")
 
 # W293: blank line contains whitespace (add a space or tab to the blank line below)
- 
+
 
 # E111: indentation is not a multiple of four (this line has 1 space)
- print("This line has incorrect indentation.")
+print("This line has incorrect indentation.")
 
 # W292: no newline at end of file
 # This error will appear if you save the file without a blank line at the very end.

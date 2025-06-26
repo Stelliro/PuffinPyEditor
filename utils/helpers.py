@@ -5,6 +5,9 @@ from typing import List, Optional
 from PyQt6.QtGui import QFontDatabase
 from .logger import log
 
+if sys.platform == "win32":
+    import winshell
+
 
 def get_base_path():
     """
@@ -18,6 +21,21 @@ def get_base_path():
     else:
         # Assumes this file is in /utils, so two levels up is the project root
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def get_startup_shortcut_path() -> Optional[str]:
+    """
+    Gets the cross-platform path to the user's startup folder for creating shortcuts.
+    Returns None if the platform is not supported.
+    """
+    if sys.platform == "win32":
+        try:
+            startup_folder = winshell.folder("startup")
+            return os.path.join(startup_folder, "PuffinPyEditor.lnk")
+        except Exception as e:
+            log.error(f"Could not get Windows startup folder path: {e}")
+            return None
+    return None
 
 
 def get_best_available_font(preferred_list: List[str]) -> Optional[str]:

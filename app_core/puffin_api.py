@@ -12,52 +12,91 @@ class PuffinPluginAPI:
 
     def __init__(self, main_window):
         self._main_window = main_window
-        # Attributes to manage the shared bottom dock area
         self._bottom_dock_widget: Optional[QDockWidget] = None
         self._bottom_tab_widget: Optional[QTabWidget] = None
         log.info("PuffinPluginAPI initialized.")
 
     def get_main_window(self):
+        """Returns the main application window instance."""
         return self._main_window
 
     def get_manager(self, manager_name: str) -> Optional[object]:
-        manager_map = {
-            "settings": self._main_window.settings, "theme": self._main_window.theme_manager,
-            "project": self._main_window.project_manager, "completion": self._main_window.completion_manager,
-            "github": self._main_window.github_manager, "git": self._main_window.git_manager,
-            "file_handler": self._main_window.file_handler, "linter": self._main_window.linter_manager,
-            "update": self._main_window.update_manager,
-            "plugin": self._main_window.plugin_manager
-        }
-        manager = manager_map.get(manager_name.lower())
-        if not manager: log.warning(f"Plugin requested unknown manager: '{manager_name}'")
-        return manager
+        """
+        Gets a core application manager instance by name.
+        This uses if/elif to avoid creating a large dictionary and eagerly
+        evaluating all manager attributes on every call.
+        """
+        name = manager_name.lower()
+        if name == "settings":
+            return self._main_window.settings
+        elif name == "theme":
+            return self._main_window.theme_manager
+        elif name == "project":
+            return self._main_window.project_manager
+        elif name == "completion":
+            return self._main_window.completion_manager
+        elif name == "github":
+            return self._main_window.github_manager
+        elif name == "git":
+            return self._main_window.git_manager
+        elif name == "file_handler":
+            return self._main_window.file_handler
+        elif name == "linter":
+            return self._main_window.linter_manager
+        elif name == "update":
+            return self._main_window.update_manager
+        elif name == "plugin":
+            return self._main_window.plugin_manager
 
-    def get_menu(self, menu_name: str) -> QMenu:
-        name_map = {"file": self._main_window.file_menu, "edit": self._main_window.edit_menu,
-                    "view": self._main_window.view_menu, "go": self._main_window.go_menu,
-                    "run": self._main_window.run_menu, "tools": self._main_window.tools_menu,
-                    "help": self._main_window.help_menu}
-        # Allow plugins to get the core debug menu if it exists
-        if hasattr(self._main_window, 'debug_menu'):
-            name_map['debug'] = self._main_window.debug_menu
+        log.warning(f"Plugin requested unknown manager: '{manager_name}'")
+        return None
 
-        if menu_name.lower() in name_map: return name_map[menu_name.lower()]
+    def get_menu(self, menu_name: str) -> Optional[QMenu]:
+        """Gets a QMenu by name. Does not create new menus."""
+        return getattr(self._main_window, f"{menu_name}_menu", None)
 
-        # Check for menus created by other plugins
-        for action in self._main_window.menuBar().actions():
-            if isinstance(action.menu(), QMenu) and action.text().replace('&', '').lower() == menu_name.lower():
-                return action.menu()
-
-        log.info(f"Creating new top-level menu for plugin: '{menu_name}'")
-        return self._main_window.menuBar().addMenu(f"&{menu_name.capitalize()}")
-
-    def add_menu_action(self, menu_name: str, text: str, callback: Callable, shortcut: Optional[str] = None,
-                        icon_name: Optional[str] = None):
+    def add_menu_action(self, menu_name: str, text: str, callback: Callable,
+                        shortcut: Optional[str] = None, icon_name: Optional[str] = None) -> QAction:
+        """Adds an action to a menu, creating the menu in a standard order if it doesn't exist."""
         menu = self.get_menu(menu_name)
-        action = menu.addAction(qta.icon(icon_name), text) if icon_name else menu.addAction(text)
-        if shortcut: action.setShortcut(shortcut)
+        if not menu:
+            log.info(f"Menu '{menu_name}' not found. Creating it dynamically.")
+            menu_bar = self._main_window.menuBar()
+
+            # Define the standard order of menus
+            standard_order = ["file", "edit", "view", "go", "run", "tools", "help"]
+
+            # Find the correct action to insert the new menu before
+            insert_before_action = None
+            current_menu_index = standard_order.index(menu_name) if menu_name in standard_order else -1
+
+            if current_menu_index != -1:
+                # Find the next menu in the standard order that already exists
+                for next_menu_name in standard_order[current_menu_index + 1:]:
+                    if next_menu := self.get_menu(next_menu_name):
+                        insert_before_action = next_menu.menuAction()
+                        break
+
+            new_menu = QMenu(f"&{menu_name.capitalize()}", self._main_window)
+
+            if insert_before_action:
+                menu_bar.insertMenu(insert_before_action, new_menu)
+            else:
+                # If no subsequent menu is found (e.g., adding a new last menu), just add it
+                menu_bar.addMenu(new_menu)
+
+            menu = new_menu
+            setattr(self._main_window, f"{menu_name}_menu", menu)
+            log.info(f"Dynamically created and inserted menu '{menu_name}'.")
+
+        icon = qta.icon(icon_name) if icon_name else None
+        action = QAction(icon, text, self._main_window)
+        if icon_name:
+            action.setData(icon_name)
+        if shortcut:
+            action.setShortcut(shortcut)
         action.triggered.connect(callback)
+        menu.addAction(action)
         log.info(f"Added action '{text}' to menu '{menu_name}'.")
         return action
 
@@ -87,16 +126,8 @@ class PuffinPluginAPI:
             self._main_window.view_menu.addSeparator()
             self._main_window.view_menu.addAction(dock.toggleViewAction())
         log.info(f"Registered panel '{title}'")
-    
-    def register_file_opener(self, extension: str, handler_func: Callable):
-        """
-        Registers a function to handle opening files with a specific extension.
-        The handler function will receive the full filepath as its only argument.
 
-        Args:
-            extension: The file extension to handle (e.g., '.md', '.csv').
-            handler_func: The function to call when a file with this extension is opened.
-        """
+    def register_file_opener(self, extension: str, handler_func: Callable):
         if not extension.startswith('.'):
             extension = '.' + extension
         self._main_window.file_open_handlers[extension.lower()] = handler_func
@@ -111,13 +142,10 @@ class PuffinPluginAPI:
         self._main_window.statusBar().showMessage(text, timeout_ms)
 
     def log_info(self, message: str):
-        """Logs an informational message."""
         log.info(f"[Plugin] {message}")
 
     def log_warning(self, message: str):
-        """Logs a warning message."""
         log.warning(f"[Plugin] {message}")
 
     def log_error(self, message: str):
-        """Logs an error message."""
         log.error(f"[Plugin] {message}")

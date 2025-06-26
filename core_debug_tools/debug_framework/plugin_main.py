@@ -1,7 +1,7 @@
 # PuffinPyEditor/core_debug_tools/debug_framework/plugin_main.py
-from .api import PuffinDebugAPI  # CORRECTED IMPORT: Use relative import
-from .debug_window import DebugWindow
 from utils.logger import log
+from .api import PuffinDebugAPI
+from .debug_window import DebugWindow
 
 
 class DebugFrameworkPlugin:
@@ -10,38 +10,45 @@ class DebugFrameworkPlugin:
         self.puffin_api = main_window.puffin_api
         self.debug_window = None
 
-        log.info("Initializing Debug Framework Plugin.")
-        self._setup_api_and_menu()
+        log.info("Initializing Debug Tools Framework...")
 
-    def _setup_api_and_menu(self):
-        """Creates the Debug menu and attaches the debug API."""
-        if hasattr(self.main_window, 'debug_api'):
-            log.warning("Debug API already exists. Skipping setup.")
-            return
+        # Create the 'Debug' menu if it doesn't exist
+        if not hasattr(self.main_window, 'debug_menu'):
+            self.main_window.debug_menu = self.main_window.menuBar().addMenu("&Debug")
 
-        self.debug_window = DebugWindow(self.puffin_api, self.main_window)
+        # Create the Debug API and attach it to the main window
+        self.main_window.debug_api = PuffinDebugAPI(self)
 
-        # Attach the specialized debug API to the main window for other debug tools
-        self.main_window.debug_api = PuffinDebugAPI(self.debug_window)
-
-        # Create the main "Debug" menu using the core API
-        # Store the menu on the main window so other plugins can add to it.
-        self.main_window.debug_menu = self.puffin_api.get_menu("debug")
-
+        # Add the main action to show the debugger window
+        self.main_window.debug_api.puffin_api = self.puffin_api  # Cross-reference
         self.puffin_api.add_menu_action(
             menu_name="debug",
-            text="Show Debugger Window",
-            callback=self.show_debug_window,
-            icon_name="fa5s.cogs"
+            text="Show Debugger",
+            callback=self.show_debugger_window,
+            icon_name="fa5s.bug"
         )
-        self.main_window.debug_menu.addSeparator()
+        log.info("Debug Framework initialized and attached to MainWindow.")
 
-    def show_debug_window(self):
-        """Shows the main debugger window."""
+    def show_debugger_window(self):
+        """Shows the main debugger window, creating it if necessary."""
+        if self.debug_window is None or not self.debug_window.isVisible():
+            # Pass the PuffinAPI to the debug window so it can pass it to tools
+            self.debug_window = DebugWindow(self.puffin_api, self.main_window)
+            # Re-register any tools that might have been registered before window was shown
+            for name, widget_class in self.main_window.debug_api.registered_tools.items():
+                self.debug_window.add_tool_tab(name, widget_class)
+
+        self.debug_window.show()
+        self.debug_window.raise_()
+        self.debug_window.activateWindow()
+
+    def add_tool_tab(self, tool_name: str, widget_class: type):
+        """Callback for the DebugAPI to add a tab to our window."""
         if self.debug_window:
-            self.debug_window.show()
-            self.debug_window.raise_()
-            self.debug_window.activateWindow()
+            self.debug_window.add_tool_tab(tool_name, widget_class)
+        else:
+            # Window not created yet, API will handle queuing it
+            pass
 
 
 def initialize(main_window):

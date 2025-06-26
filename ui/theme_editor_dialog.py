@@ -1,6 +1,4 @@
-# PuffinPyEditor/ui/dialogs/theme_editor_dialog.py
-import os
-import json
+# PuffinPyEditor/ui/theme_editor_dialog.py
 import re
 import datetime
 import copy
@@ -15,6 +13,7 @@ from app_core.theme_manager import theme_manager
 
 
 class ColorPickerButton(QPushButton):
+    """A custom button that displays a color swatch and opens a color picker."""
     color_changed = pyqtSignal(str, QColor)
 
     def __init__(self, key_name: str, initial_color=QColor("black"), parent=None):
@@ -50,6 +49,7 @@ class ColorPickerButton(QPushButton):
 
 
 class ThemeEditorDialog(QDialog):
+    """A dialog for creating, editing, and deleting UI themes."""
     custom_themes_changed = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -63,16 +63,17 @@ class ThemeEditorDialog(QDialog):
             "Editor": ["editor.background", "editor.foreground", "editor.lineHighlightBackground"],
             "Editor Gutter": ["editorGutter.background", "editorGutter.foreground"],
             "Editor Matching": ["editor.matchingBracketBackground", "editor.matchingBracketForeground"],
-            "Controls": ["button.background", "button.foreground", "input.background", "input.foreground",
-                         "input.border"],
-            "Bars & Menus": ["statusbar.background", "statusbar.foreground", "menu.background", "menu.foreground"],
-            "Editor Tabs": ["tab.activeBackground", "tab.inactiveBackground", "tab.activeForeground",
-                            "tab.inactiveForeground"],
-            "Scrollbar": ["scrollbar.background", "scrollbar.handle", "scrollbar.handleHover",
-                          "scrollbar.handlePressed"],
-            "Syntax Highlighting": ["syntax.keyword", "syntax.operator", "syntax.brace", "syntax.decorator",
-                                    "syntax.self",
-                                    "syntax.className", "syntax.functionName", "syntax.comment", "syntax.string",
+            "Controls": ["button.background", "button.foreground", "input.background",
+                         "input.foreground", "input.border"],
+            "Bars & Menus": ["statusbar.background", "statusbar.foreground", "menu.background",
+                             "menu.foreground"],
+            "Editor Tabs": ["tab.activeBackground", "tab.inactiveBackground",
+                            "tab.activeForeground", "tab.inactiveForeground"],
+            "Scrollbar": ["scrollbar.background", "scrollbar.handle",
+                          "scrollbar.handleHover", "scrollbar.handlePressed"],
+            "Syntax Highlighting": ["syntax.keyword", "syntax.operator", "syntax.brace",
+                                    "syntax.decorator", "syntax.self", "syntax.className",
+                                    "syntax.functionName", "syntax.comment", "syntax.string",
                                     "syntax.docstring", "syntax.number"]
         }
         self.current_theme_id = None
@@ -237,7 +238,9 @@ class ThemeEditorDialog(QDialog):
             return
 
         new_name = f"{original_theme.get('name', 'New Theme')} (Copy)"
-        new_id = f"custom_{re.sub('[^a-z0-9_]', '', new_name.lower())}_{int(datetime.datetime.now().timestamp())}"
+        safe_name = re.sub(r'[^a-z0-9_]', '', new_name.lower())
+        timestamp = int(datetime.datetime.now().timestamp())
+        new_id = f"custom_{safe_name}_{timestamp}"
 
         original_theme['name'] = new_name
         original_theme['author'] = "PuffinPy User"
@@ -250,7 +253,8 @@ class ThemeEditorDialog(QDialog):
     def _action_delete_theme(self):
         if not self.current_theme_id or not self.is_custom_theme:
             return
-        theme_name = theme_manager.get_theme_data_by_id(self.current_theme_id).get('name', self.current_theme_id)
+        theme_data = theme_manager.get_theme_data_by_id(self.current_theme_id)
+        theme_name = theme_data.get('name', self.current_theme_id)
         reply = QMessageBox.question(self, "Confirm Delete",
                                      f"Are you sure you want to delete the theme '{theme_name}'?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,

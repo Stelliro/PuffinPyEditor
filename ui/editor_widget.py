@@ -1,8 +1,9 @@
 # PuffinPyEditor/ui/editor_widget.py
 from PyQt6.QtWidgets import (QPlainTextEdit, QWidget, QHBoxLayout, QTextEdit,
-                             QMenu, QToolTip)
+                             QToolTip, QFrame, QVBoxLayout)
 from PyQt6.QtGui import (QFont, QColor, QPainter, QPaintEvent, QFontMetrics,
-                         QKeyEvent, QTextCursor, QAction, QCursor, QTextDocument, QPen, QTextFormat)
+                         QKeyEvent, QTextCursor, QAction, QCursor, QTextDocument,
+                         QPen, QTextFormat)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from utils.logger import log
 from app_core.settings_manager import settings_manager
@@ -29,10 +30,6 @@ class CustomPlainTextEdit(QPlainTextEdit):
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        # --- BUG FIX for Print Screen Key ---
-        # This is the primary location to catch the key, as the editor
-        # will almost always have focus. Ignoring the event here releases
-        # it to the parent widget and eventually to the OS.
         if event.key() == Qt.Key.Key_Print:
             event.ignore()
             log.debug("Print Screen key ignored in editor to allow OS handling.")
@@ -119,19 +116,25 @@ class CustomPlainTextEdit(QPlainTextEdit):
         self.editor_widget_ref.paint_indentation_guides(self)
 
 
-class EditorWidget(QWidget):
+class EditorWidget(QFrame):
     content_possibly_changed = pyqtSignal()
     cursor_position_display_updated = pyqtSignal(int, int)
 
     def __init__(self, completion_manager: CompletionManager, parent=None):
         super().__init__(parent)
+        self.setObjectName("EditorWidgetFrame")
         self.filepath = None
         self.completion_manager = completion_manager
         self.theme_manager = theme_manager
         self.breakpoints = set()
         self.completion_manager.hover_tip_ready.connect(self._display_tooltip)
 
-        self.layout = QHBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+
+        editor_area_widget = QWidget()
+        self.layout = QHBoxLayout(editor_area_widget)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
 
@@ -143,6 +146,8 @@ class EditorWidget(QWidget):
         self.layout.addWidget(self.breakpoint_area)
         self.layout.addWidget(self.line_number_area)
         self.layout.addWidget(self.text_area)
+        
+        self.main_layout.addWidget(editor_area_widget, 1)
 
         self.highlighter = PythonSyntaxHighlighter(self.text_area.document())
 
@@ -258,21 +263,22 @@ class EditorWidget(QWidget):
         self.text_area.setPlainText(text)
         self.update_editor_settings()
 
-    def find_next(self, query: str, flags: QTextDocument.FindFlag):
+    def find_next(self, query: str, flags: QTextDocument.FindFlag) -> bool:
         found = self.text_area.find(query, flags)
         if not found:
             cursor = self.text_area.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.Start)
             self.text_area.setTextCursor(cursor)
-            self.text_area.find(query, flags)
+            return self.text_area.find(query, flags)
+        return True
 
-    def replace_current(self, query: str, replace_text: str, flags: QTextDocument.FindFlag):
+    def replace_current(self, query: str, replace_text: str, flags: QTextDocument.FindFlag) -> bool:
         cursor = self.text_area.textCursor()
-        # If text is selected (presumably from a 'find' operation), replace it.
         if cursor.hasSelection():
             cursor.insertText(replace_text)
-        # Find the next occurrence.
-        self.find_next(query, flags)
+            self.find_next(query, flags)
+            return True
+        return False
 
     def replace_all(self, query: str, replace_text: str, flags: QTextDocument.FindFlag) -> int:
         count = 0

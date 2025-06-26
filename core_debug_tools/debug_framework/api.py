@@ -1,5 +1,5 @@
-# PuffinPyEditor/plugins/debug_framework/api.py
-from typing import Dict, Optional, Type
+# PuffinPyEditor/core_debug_tools/debug_framework/api.py
+from typing import Dict, Type
 from PyQt6.QtWidgets import QWidget
 from utils.logger import log
 
@@ -19,6 +19,7 @@ class PuffinDebugAPI:
         Args:
             tool_name: The name to be displayed on the tab.
             widget_class: The QWidget class (not an instance) to be instantiated.
+                          The class constructor should accept the main PuffinAPI instance.
         """
         if tool_name in self.registered_tools:
             log.warning(f"Debug tool '{tool_name}' is already registered. Overwriting.")

@@ -6,7 +6,7 @@ import importlib.util
 import zipfile
 import tempfile
 import shutil
-from utils.logger import log
+from utils.logger import log, get_app_data_path
 from utils.helpers import get_base_path
 
 
@@ -14,168 +14,182 @@ class PluginManager:
 
     def __init__(self, main_window):
         self.main_window = main_window
-        base_path = get_base_path()
+        base_app_path = get_base_path()
+        app_data_path = get_app_data_path()
 
-        self.plugins_directory = os.path.join(base_path, "plugins")
-        self.core_tools_directory = os.path.join(base_path, "core_debug_tools")
-        log.info(f"Plugin search directories set to: {self.plugins_directory} and {self.core_tools_directory}")
+        # Built-in plugins are read-only from the installation directory
+        self.built_in_plugins_dir = os.path.join(base_app_path, "plugins")
+        self.core_tools_directory = os.path.join(base_app_path, "core_debug_tools")
+        # User-installed plugins go to the writable app data directory
+        self.user_plugins_directory = os.path.join(app_data_path, "plugins")
+
+        log.info(f"Plugin search directories set to: "
+                 f"{self.built_in_plugins_dir} (built-in) and "
+                 f"{self.user_plugins_directory} (user)")
 
         self.loaded_plugins = {}
         self.installed_plugins_metadata = []
 
-        if not os.path.isdir(self.plugins_directory):
-            log.info(f"Creating plugins directory at: {os.path.abspath(self.plugins_directory)}")
-            os.makedirs(self.plugins_directory)
+        # Ensure the user plugins directory exists and is a package
+        if not os.path.isdir(self.user_plugins_directory):
+            log.info(f"Creating user plugins directory at: "
+                     f"{os.path.abspath(self.user_plugins_directory)}")
+            os.makedirs(self.user_plugins_directory)
 
-    def discover_and_load_plugins(self):
+        init_path = os.path.join(self.user_plugins_directory, "__init__.py")
+        if not os.path.exists(init_path):
+            with open(init_path, 'w', encoding='utf-8') as f:
+                pass
+
+    def discover_and_load_plugins(self, ignore_list: list = None):
         """
-        Discovers and loads all plugins from the /plugins directory.
-        It also discovers metadata for core tools but does not load them.
+        Discovers plugins from both built-in and user directories and loads them.
+
+        Args:
+            ignore_list: A list of plugin IDs to skip (e.g., if loaded manually).
         """
+        if ignore_list is None:
+            ignore_list = []
+
         log.info("Starting plugin discovery...")
         self.installed_plugins_metadata = []
         plugins_to_load = {}
 
-        # Discover and process regular, user-installable plugins
-        try:
-            plugin_folders = [d for d in os.listdir(self.plugins_directory) if
-                              os.path.isdir(os.path.join(self.plugins_directory, d)) and not d.startswith('__')]
+        # Discover from all potential plugin sources
+        plugin_sources = {
+            "built-in": self.built_in_plugins_dir,
+            "core-tool": self.core_tools_directory,
+            "user": self.user_plugins_directory,
+        }
 
-            for item_name in plugin_folders:
-                manifest_path = os.path.join(self.plugins_directory, item_name, "plugin.json")
-                if not os.path.exists(manifest_path):
-                    continue
-                try:
-                    with open(manifest_path, 'r', encoding='utf-8') as f:
-                        manifest = json.load(f)
+        for source_type, plugin_dir in plugin_sources.items():
+            if not os.path.isdir(plugin_dir):
+                log.warning(f"Plugin directory not found: '{plugin_dir}'. Skipping.")
+                continue
 
-                    plugin_id = manifest.get('id', item_name)
-                    manifest['id'] = plugin_id
-                    manifest['is_core'] = True # Mark all built-in plugins as core/non-deletable
-                    self.installed_plugins_metadata.append(manifest)
-                    plugins_to_load[item_name] = manifest
-                except (json.JSONDecodeError, IOError) as e:
-                    log.error(f"Failed to read manifest for plugin '{item_name}': {e}")
-        except FileNotFoundError:
-            log.error(f"Plugins directory not found at '{self.plugins_directory}'.")
+            for item_name in os.listdir(plugin_dir):
+                plugin_path = os.path.join(plugin_dir, item_name)
+                if os.path.isdir(plugin_path) and not item_name.startswith('__'):
+                    manifest_path = os.path.join(plugin_path, "plugin.json")
+                    if os.path.exists(manifest_path):
+                        try:
+                            with open(manifest_path, 'r', encoding='utf-8') as f:
+                                manifest = json.load(f)
 
-        # Discover metadata for core debug tools (for UI listing only)
-        try:
-            if os.path.isdir(self.core_tools_directory):
-                tool_folders = [d for d in os.listdir(self.core_tools_directory) if
-                                os.path.isdir(os.path.join(self.core_tools_directory, d)) and not d.startswith('__')]
+                            plugin_id = manifest.get('id', item_name)
 
-                for item_name in tool_folders:
-                    manifest_path = os.path.join(self.core_tools_directory, item_name, "plugin.json")
-                    if not os.path.exists(manifest_path):
-                        continue
-                    try:
-                        with open(manifest_path, 'r', encoding='utf-8') as f:
-                            manifest = json.load(f)
-                        plugin_id = manifest.get('id', item_name)
-                        manifest['id'] = plugin_id
-                        manifest['is_core'] = True
-                        self.installed_plugins_metadata.append(manifest)
-                        # NOTE: We do NOT add these to `plugins_to_load`. They are loaded separately.
-                    except (json.JSONDecodeError, IOError) as e:
-                        log.error(f"Failed to read manifest for core tool '{item_name}': {e}")
-        except FileNotFoundError:
-            log.warning(f"Core debug tools directory not found at '{self.core_tools_directory}'.")
+                            if plugin_id in ignore_list:
+                                log.info(f"Skipping plugin '{plugin_id}' as it's in the ignore list.")
+                                continue
 
+                            if plugin_id in plugins_to_load:
+                                log.warning(f"Duplicate plugin ID '{plugin_id}'. "
+                                            f"User/Core plugin overrides built-in.")
 
-        # Load the regular plugins
-        for item_name, manifest in plugins_to_load.items():
+                            manifest['id'] = plugin_id
+                            manifest['is_core'] = (source_type != "user")
+                            self.installed_plugins_metadata.append(manifest)
+                            plugins_to_load[plugin_id] = (manifest, plugin_path)
+
+                        except (json.JSONDecodeError, IOError) as e:
+                            log.error(f"Failed to read manifest for "
+                                      f"'{item_name}': {e}")
+
+        for plugin_id, (manifest, plugin_path) in plugins_to_load.items():
             try:
-                if self._validate_manifest(manifest, item_name):
-                    self._load_plugin(item_name, manifest)
+                self._load_plugin(plugin_id, manifest, plugin_path)
             except Exception as e:
-                log.error(f"Failed to process or load plugin '{item_name}': {e}", exc_info=True)
+                log.error(f"Failed to process or load plugin '{plugin_id}': {e}",
+                          exc_info=True)
 
-    def _validate_manifest(self, manifest, plugin_id):
-        if not manifest.get("entry_point"):
-            entry_point_file = "plugin_main.py"
-            manifest["entry_point"] = entry_point_file
-        else:
-            entry_point_file = manifest["entry_point"]
+    def _load_plugin(self, plugin_id: str, manifest: dict, plugin_path: str):
+        """
+        Loads a single plugin from an arbitrary path using importlib.util.
+        """
+        entry_point = manifest.get("entry_point", "plugin_main.py")
+        entry_point_path = os.path.join(plugin_path, entry_point)
 
-        entry_path = os.path.join(self.plugins_directory, plugin_id, entry_point_file)
-        if not os.path.exists(entry_path):
-            log.error(f"Entry point '{entry_point_file}' not found for '{plugin_id}'. Skipping.")
-            return False
-        return True
-
-    def _load_plugin(self, plugin_id, manifest):
-        plugin_path = os.path.abspath(os.path.join(self.plugins_directory, plugin_id))
-        module_name = f"puffin_plugin_{plugin_id.replace('-', '_')}"
-        spec_path = os.path.join(plugin_path, manifest["entry_point"])
-
-        original_sys_path = list(sys.path)
-        if plugin_path not in sys.path:
-            sys.path.insert(0, plugin_path)
+        if not os.path.exists(entry_point_path):
+            log.error(f"Entry point '{entry_point}' not found for plugin "
+                      f"'{plugin_id}'. Skipping.")
+            return
 
         try:
-            spec = importlib.util.spec_from_file_location(module_name, spec_path)
-            if not spec or not spec.loader:
-                log.error(f"Could not create module spec for plugin: {plugin_id}")
+            # Treat the plugin's directory as a package to allow relative imports.
+            spec = importlib.util.spec_from_file_location(
+                name=plugin_id,
+                location=entry_point_path,
+                submodule_search_locations=[plugin_path]  # This makes it a package
+            )
+
+            if spec is None:
+                log.error(f"Could not create module spec for plugin '{plugin_id}' at '{entry_point_path}'")
                 return
 
             module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-
+            sys.modules[spec.name] = module  # Use spec.name, which is plugin_id
             spec.loader.exec_module(module)
 
             if hasattr(module, 'initialize'):
                 instance = module.initialize(self.main_window)
                 self.loaded_plugins[plugin_id] = {
-                    "module": module,
-                    "instance": instance,
-                    "manifest": manifest
+                    "module": module, "instance": instance, "manifest": manifest
                 }
-                log.info(f"Successfully initialized plugin: {manifest.get('name', plugin_id)}")
+                log.info(f"Successfully initialized plugin: "
+                         f"{manifest.get('name', plugin_id)}")
             else:
-                log.error(f"Plugin '{plugin_id}' has no 'initialize' function. Skipping.")
-        finally:
-            sys.path[:] = original_sys_path
+                log.error(f"Plugin '{plugin_id}' has no 'initialize' function. "
+                          f"Skipping.")
+
+        except Exception as e:
+            log.error(f"An unexpected error occurred loading plugin '{plugin_id}': "
+                      f"{e}", exc_info=True)
 
     def get_installed_plugins(self) -> list:
         return self.installed_plugins_metadata
 
     def install_plugin_from_zip(self, zip_filepath: str) -> tuple[bool, str]:
-        if not zipfile.is_zipfile(zip_filepath): return False, "Not a valid zip archive."
+        if not zipfile.is_zipfile(zip_filepath):
+            return False, "Not a valid zip archive."
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 with zipfile.ZipFile(zip_filepath, 'r') as z:
                     z.extractall(temp_dir)
                 items = os.listdir(temp_dir)
-                is_nested_folder = len(items) == 1 and os.path.isdir(os.path.join(temp_dir, items[0]))
-                src_dir = os.path.join(temp_dir, items[0]) if is_nested_folder else temp_dir
+                is_nested = len(items) == 1 and os.path.isdir(os.path.join(temp_dir, items[0]))
+                src_dir = os.path.join(temp_dir, items[0]) if is_nested else temp_dir
                 manifest_path = os.path.join(src_dir, 'plugin.json')
-                if not os.path.exists(
-                        manifest_path): return False, "Archive does not contain a 'plugin.json' at its root."
+                if not os.path.exists(manifest_path):
+                    return False, "Archive missing 'plugin.json' at its root."
                 with open(manifest_path, 'r', encoding='utf-8') as f:
                     manifest = json.load(f)
                 plugin_id = manifest.get('id', os.path.basename(src_dir).lower().replace(' ', '_'))
-                target_path = os.path.join(self.plugins_directory, plugin_id)
-                if os.path.exists(target_path): return False, f"A plugin named '{plugin_id}' already exists."
+                target_path = os.path.join(self.user_plugins_directory, plugin_id)
+                if os.path.exists(target_path):
+                    return False, f"A plugin named '{plugin_id}' already exists."
                 shutil.move(src_dir, target_path)
-                log.info(f"Plugin '{manifest.get('name', plugin_id)}' installed to '{target_path}'")
-                return True, f"Plugin '{manifest.get('name', plugin_id)}' installed successfully."
+                log.info(f"Plugin '{manifest.get('name', plugin_id)}' installed "
+                         f"to '{target_path}'")
+                return True, f"Plugin '{manifest.get('name', plugin_id)}' installed."
         except Exception as e:
-            log.error(f"Failed to install plugin from {zip_filepath}: {e}", exc_info=True)
+            log.error(f"Failed to install plugin from {zip_filepath}: {e}",
+                      exc_info=True)
             return False, f"An unexpected error occurred: {e}"
 
     def uninstall_plugin(self, plugin_id: str) -> tuple[bool, str]:
-        # Check if the plugin is marked as core from its manifest
-        plugin_meta = next((p for p in self.installed_plugins_metadata if p.get('id') == plugin_id), None)
+        plugin_meta = next((p for p in self.installed_plugins_metadata
+                            if p.get('id') == plugin_id), None)
         if plugin_meta and plugin_meta.get('is_core'):
-            return False, "This is a core plugin and cannot be uninstalled."
+            return False, "This is a built-in plugin and cannot be uninstalled."
 
-        target_path = os.path.join(self.plugins_directory, plugin_id)
-        if not os.path.exists(target_path): return False, f"Plugin '{plugin_id}' not found."
+        target_path = os.path.join(self.user_plugins_directory, plugin_id)
+        if not os.path.exists(target_path):
+            return False, f"Plugin '{plugin_id}' not in the user directory."
         try:
             shutil.rmtree(target_path)
             log.info(f"Successfully uninstalled plugin '{plugin_id}'.")
             return True, f"Plugin '{plugin_id}' uninstalled."
         except OSError as e:
-            log.error(f"Failed to uninstall plugin '{plugin_id}': {e}", exc_info=True)
+            log.error(f"Failed to uninstall plugin '{plugin_id}': {e}",
+                      exc_info=True)
             return False, f"Error removing plugin directory: {e}"

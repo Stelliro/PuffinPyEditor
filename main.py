@@ -1,31 +1,30 @@
 # PuffinPyEditor/main.py
 import sys
-import os
+import traceback
 
 # --- Core Imports ---
 from PyQt6.QtWidgets import QApplication
-from app_core.settings_manager import settings_manager
 from app_core.theme_manager import theme_manager
 from ui.main_window import MainWindow
 from utils.logger import log
 
 
-def excepthook_handler(exc_type, exc_value, exc_tb):
-    """A simple fallback excepthook to log uncaught exceptions."""
-    log.critical("--- FALLBACK EXCEPTION HANDLER ---")
-    log.critical("An uncaught exception occurred. Details below.",
-                 exc_info=(exc_type, exc_value, exc_tb))
-    # It's crucial to call the original hook to ensure the app closes.
-    if 'original_hook' in locals() and original_hook:
-        original_hook(exc_type, exc_value, exc_tb)
-    else:
-        sys.__excepthook__(exc_type, exc_value, exc_tb)
+def fallback_excepthook(exc_type, exc_value, exc_tb):
+    """A simple fallback excepthook to log uncaught exceptions if the main handler fails."""
+    log.critical("--- FATAL UNHANDLED EXCEPTION ---")
+    tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    log.critical(f"Traceback:\n{tb_text}")
+    # Also print to stderr for visibility if the log file is not accessible
+    print(f"FATAL ERROR:\n{tb_text}", file=sys.stderr)
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
 
 
 def main():
+    # Set the fallback hook immediately. It will be replaced by a better one
+    # if the application initializes correctly.
+    sys.excepthook = fallback_excepthook
+
     DEBUG_MODE = "--debug" in sys.argv
-    # Store the original hook before we potentially replace it.
-    original_hook = sys.excepthook
 
     log.info("=" * 53)
     log.info(f"PuffinPyEditor Application Starting... (Debug: {DEBUG_MODE})")
@@ -33,39 +32,27 @@ def main():
     log.info(f"Operating System: {sys.platform}")
     log.info("=" * 53)
 
-    # If in debug mode, set up the enhanced crash reporter immediately.
-    # This ensures even pre-GUI startup errors are caught nicely.
-    # For non-debug, we let the standard logging handle it.
-    if DEBUG_MODE:
-        try:
-            from core_debug_tools.enhanced_exceptions.plugin_main import EnhancedExceptionsPlugin
-            # Pass the original hook to our handler so it can call it after showing the dialog.
-            EnhancedExceptionsPlugin(main_window=None, original_hook=original_hook)
-            log.info("Enhanced exception reporter enabled for debug mode.")
-        except ImportError as e:
-            log.warning(f"Could not load enhanced exception handler, using basic logger: {e}")
-            sys.excepthook = excepthook_handler
-
     app = QApplication(sys.argv)
     app.setApplicationName("PuffinPyEditor")
     app.setOrganizationName("PuffinPyEditorProject")
 
     theme_manager.apply_theme_to_app(app)
 
-    main_window = MainWindow(debug_mode=DEBUG_MODE)
-    log.debug("MainWindow instance created.")
+    # Separate initialization from execution for clarity and stability.
+    # This is a more robust pattern for starting a PyQt application.
+    try:
+        main_window = MainWindow(debug_mode=DEBUG_MODE)
+        log.info("MainWindow instance created successfully.")
+    except Exception:
+        # The enhanced exception hook will now properly catch this
+        # because we are not swallowing the exception in a simple sys.exit().
+        log.critical("A fatal error occurred during MainWindow initialization.")
+        # Re-raising the exception ensures it gets passed to the excepthook.
+        raise
 
     main_window.show()
     log.info("MainWindow shown. Entering main event loop.")
-
-    try:
-        exit_code = app.exec()
-        log.info(f"Application exited cleanly with code {exit_code}.")
-        sys.exit(exit_code)
-    except Exception:
-        # This will be caught by our custom hook if it was set up.
-        log.critical("An unhandled exception occurred during app.exec().", exc_info=True)
-        sys.exit(1)
+    sys.exit(app.exec())
 
 
 if __name__ == '__main__':

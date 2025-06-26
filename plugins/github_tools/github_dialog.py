@@ -99,7 +99,6 @@ class GitHubDialog(QDialog):
         super().closeEvent(event)
 
     def _update_user_info(self):
-        # Assumes `get_user_info()` method exists on GitHubManager
         user_info = self.github_manager.get_user_info()
         if user_info and user_info.get('login'):
             self.user_label.setText(

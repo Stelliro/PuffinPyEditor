@@ -10,7 +10,6 @@ import qtawesome as qta
 
 from app_core.project_manager import ProjectManager
 from app_core.source_control_manager import SourceControlManager
-from utils.logger import log
 
 
 class ProjectSourceControlPanel(QWidget):
@@ -23,7 +22,8 @@ class ProjectSourceControlPanel(QWidget):
     link_to_remote_requested = pyqtSignal(str)
     change_visibility_requested = pyqtSignal(str)
 
-    def __init__(self, project_manager: ProjectManager, git_manager: SourceControlManager, parent=None):
+    def __init__(self, project_manager: ProjectManager,
+                 git_manager: SourceControlManager, parent=None):
         super().__init__(parent)
         self.project_manager = project_manager
         self.git_manager = git_manager
@@ -93,8 +93,10 @@ class ProjectSourceControlPanel(QWidget):
 
     def _get_selected_project_path(self) -> Optional[str]:
         item = self.project_tree.currentItem()
-        if not item: return self.project_manager.get_active_project_path()
-        while parent := item.parent(): item = parent
+        if not item:
+            return self.project_manager.get_active_project_path()
+        while parent := item.parent():
+            item = parent
         data = item.data(0, Qt.ItemDataRole.UserRole)
         return data.get('path') if data else None
 
@@ -116,15 +118,18 @@ class ProjectSourceControlPanel(QWidget):
         path = self._get_selected_project_path()
         message = self.commit_message_edit.text().strip()
         if not path or not message:
-            QMessageBox.warning(self, "Commit Failed", "A project must be selected and a commit message must be provided.")
+            QMessageBox.warning(self, "Commit Failed", "A project must be selected "
+                                "and a commit message must be provided.")
             return
         self.set_ui_locked(True, f"Committing changes in {os.path.basename(path)}...")
         self.git_manager.commit_files(path, message)
 
     def _on_fix_branch_mismatch_clicked(self, path: str):
         reply = QMessageBox.warning(
-            self, "Confirm Branch Fix", "This will perform a force-push and delete the 'master' branch from the remote. Are you sure?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel
+            self, "Confirm Branch Fix", "This will perform a force-push and delete "
+            "the 'master' branch from the remote. Are you sure?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel
         )
         if reply == QMessageBox.StandardButton.Yes:
             self.set_ui_locked(True, f"Fixing branch mismatch for {os.path.basename(path)}...")
@@ -167,20 +172,26 @@ class ProjectSourceControlPanel(QWidget):
                 actions_widget = QWidget()
                 actions_layout = QHBoxLayout(actions_widget)
                 actions_layout.setContentsMargins(0, 0, 0, 0)
-                link_button = QPushButton("Link..."); link_button.setToolTip("Link this local folder to an existing GitHub repository")
+                link_button = QPushButton("Link...")
+                link_button.setToolTip("Link this local folder to an existing GitHub repository")
                 link_button.clicked.connect(lambda _, p=path: self.link_to_remote_requested.emit(p))
-                publish_button = QPushButton("Publish..."); publish_button.setToolTip("Create a new repository on GitHub from this project")
+                publish_button = QPushButton("Publish...")
+                publish_button.setToolTip("Create a new repository on GitHub from this project")
                 publish_button.clicked.connect(lambda _, p=path: self.publish_repo_requested.emit(p))
-                actions_layout.addStretch(); actions_layout.addWidget(link_button); actions_layout.addWidget(publish_button)
+                actions_layout.addStretch()
+                actions_layout.addWidget(link_button)
+                actions_layout.addWidget(publish_button)
                 self.project_tree.setItemWidget(item, 1, actions_widget)
         self.set_ui_locked(False, "Ready.")
-        if self.project_tree.topLevelItemCount() > 0: self.project_tree.setCurrentItem(self.project_tree.topLevelItem(0))
+        if self.project_tree.topLevelItemCount() > 0:
+            self.project_tree.setCurrentItem(self.project_tree.topLevelItem(0))
 
     def _update_project_files(self, staged: List[str], unstaged: List[str], repo_path: str):
         root = self.project_tree.invisibleRootItem()
         for i in range(root.childCount()):
             project_item = root.child(i)
-            if (item_data := project_item.data(0, Qt.ItemDataRole.UserRole)) and item_data.get('path') == repo_path:
+            item_data = project_item.data(0, Qt.ItemDataRole.UserRole)
+            if item_data and item_data.get('path') == repo_path:
                 project_item.takeChildren()
                 for f in sorted(list(set(staged + unstaged))):
                     child = QTreeWidgetItem(project_item, [f])
@@ -190,21 +201,32 @@ class ProjectSourceControlPanel(QWidget):
 
     def _show_context_menu(self, position: QPoint):
         item = self.project_tree.itemAt(position)
-        if not item: return
+        if not item:
+            return
         data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not (data and (path := data.get('path'))): return
+        if not (data and (path := data.get('path'))):
+            return
+
         menu = QMenu()
         if data['type'] == 'project':
-            menu.addAction(qta.icon('fa5s.sync-alt'), "Refresh Status", lambda: self.git_manager.get_status(path))
+            menu.addAction(qta.icon('fa5s.sync-alt'), "Refresh Status",
+                           lambda: self.git_manager.get_status(path))
             vis_action = menu.addAction(qta.icon('fa5s.eye'), "Change GitHub Visibility...")
             vis_action.triggered.connect(lambda: self.change_visibility_requested.emit(path))
             try:
-                if 'main' in [b.name for b in Repo(path).branches] and 'master' in [b.name for b in Repo(path).branches]:
+                branches = [b.name for b in Repo(path).branches]
+                if 'main' in branches and 'master' in branches:
                     menu.addSeparator()
-                    fix_action = menu.addAction(qta.icon('fa5s.exclamation-triangle', color='orange'), "Fix Branch Mismatch...")
+                    fix_action = menu.addAction(qta.icon('fa5s.exclamation-triangle',
+                                                         color='orange'), "Fix Branch Mismatch...")
                     fix_action.triggered.connect(lambda: self._on_fix_branch_mismatch_clicked(path))
-            except (InvalidGitRepositoryError, TypeError): pass
+            except (InvalidGitRepositoryError, TypeError):
+                pass
         elif data['type'] == 'non-git-project':
-            menu.addAction(qta.icon('fa5s.link'), "Link to GitHub Repo...", lambda: self.link_to_remote_requested.emit(path))
-            menu.addAction(qta.icon('fa5s.cloud-upload-alt'), "Publish to GitHub...", lambda: self.publish_repo_requested.emit(path))
-        if menu.actions(): menu.exec(self.project_tree.viewport().mapToGlobal(position))
+            menu.addAction(qta.icon('fa5s.link'), "Link to GitHub Repo...",
+                           lambda: self.link_to_remote_requested.emit(path))
+            menu.addAction(qta.icon('fa5s.cloud-upload-alt'), "Publish to GitHub...",
+                           lambda: self.publish_repo_requested.emit(path))
+
+        if menu.actions():
+            menu.exec(self.project_tree.viewport().mapToGlobal(position))

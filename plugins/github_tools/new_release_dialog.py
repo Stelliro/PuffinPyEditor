@@ -60,7 +60,6 @@ class NewReleaseDialog(QDialog):
             "Describe the changes in this release (Markdown is supported).")
         self.notes_edit.setMinimumHeight(150)
         notes_label = QLabel("<b>Release Notes:</b>")
-        # Align to top for large text areas
         notes_label.setAlignment(Qt.AlignmentFlag.AlignTop)
         form_layout.addRow(notes_label, self.notes_edit)
 

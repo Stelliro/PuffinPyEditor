@@ -8,7 +8,7 @@ class EnhancedExceptionsPlugin:
     _instance = None  # To hold the dialog instance
 
     def __init__(self, main_window, original_hook=None):
-        self.main_window = main_window # Can be None if hooked early
+        self.main_window = main_window  # Can be None if hooked early
         log.info("Initializing Enhanced Exception Reporter plugin.")
         # Store the original hook for fallback
         self.original_excepthook = original_hook or sys.excepthook
@@ -22,8 +22,7 @@ class EnhancedExceptionsPlugin:
         log.critical("Unhandled exception caught by Enhanced Reporter:",
                      exc_info=(exc_type, exc_value, exc_tb))
 
-        # Create and show the dialog. The parent will be None if the main
-        # window hasn't been created yet, which is fine.
+        # Create and show the dialog.
         dialog = ExceptionDialog(exc_type, exc_value, exc_tb, self.main_window)
         dialog.exec()
 
@@ -32,9 +31,8 @@ class EnhancedExceptionsPlugin:
         self.original_excepthook(exc_type, exc_value, exc_tb)
 
 
-def initialize(main_window):
+def initialize(main_window, original_hook):
     """Entry point for the Enhanced Exceptions plugin."""
-    # This plugin modifies a global system hook, so we only need one instance.
     if EnhancedExceptionsPlugin._instance is None:
-        EnhancedExceptionsPlugin._instance = EnhancedExceptionsPlugin(main_window)
+        EnhancedExceptionsPlugin._instance = EnhancedExceptionsPlugin(main_window, original_hook)
     return EnhancedExceptionsPlugin._instance

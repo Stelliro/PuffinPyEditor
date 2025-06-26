@@ -1,12 +1,12 @@
 # PuffinPyEditor/plugins/ai_tools/ai_export_dialog.py
 import os
 import json
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QWidget, QGroupBox,
     QTreeView, QTextEdit, QListWidget, QListWidgetItem, QPushButton,
     QDialogButtonBox, QMessageBox, QInputDialog, QComboBox, QProgressDialog,
-    QFileDialog, QApplication, QLabel
+    QFileDialog, QApplication
 )
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QCursor
 from PyQt6.QtCore import Qt, QCoreApplication
@@ -25,7 +25,10 @@ PROMPT_TYPE_USER = "user"
 
 DEFAULT_LOADOUTS = {
     "Code Review": {
-        "instructions": "You are a senior Python developer performing a code review. Analyze the provided code for issues related to correctness, style, performance, and maintainability. Provide constructive feedback and concrete examples for improvement.",
+        "instructions": "You are a senior Python developer performing a code review. "
+                        "Analyze the provided code for issues related to correctness, "
+                        "style, performance, and maintainability. Provide constructive "
+                        "feedback and concrete examples for improvement.",
         "guidelines": [
             "Check for compliance with PEP 8 style guidelines.",
             "Identify potential bugs or logical errors.",
@@ -36,12 +39,18 @@ DEFAULT_LOADOUTS = {
         ]
     },
     "Documentation Generation": {
-        "instructions": "You are a technical writer. Your task is to generate clear and comprehensive documentation for the provided Python code. Create docstrings for all public classes, methods, and functions that are missing them. Follow the Google Python Style Guide for docstrings.",
+        "instructions": "You are a technical writer. Your task is to generate clear and "
+                        "comprehensive documentation for the provided Python code. Create "
+                        "docstrings for all public classes, methods, and functions that are "
+                        "missing them. Follow the Google Python Style Guide for docstrings.",
         "guidelines": [
-            "For each function/method, include an 'Args:' section for parameters and a 'Returns:' section for the return value.",
-            "The main description of the function should be a concise, one-sentence summary.",
+            "For each function/method, include an 'Args:' section for parameters "
+            "and a 'Returns:' section for the return value.",
+            "The main description of the function should be a concise, "
+            "one-sentence summary.",
             "If a function raises exceptions, include a 'Raises:' section.",
-            "Ensure the generated documentation is professional and ready to be used in the project."
+            "Ensure the generated documentation is professional and ready to be "
+            "used in the project."
         ]
     }
 }
@@ -114,7 +123,6 @@ class AIExportDialog(QDialog):
         right_layout = QVBoxLayout(right_pane)
         self.splitter.addWidget(right_pane)
 
-        # Instructions
         instructions_group = QGroupBox("Instructions for the AI")
         instructions_layout = QVBoxLayout(instructions_group)
         self.instructions_edit = QTextEdit()
@@ -122,7 +130,6 @@ class AIExportDialog(QDialog):
         instructions_layout.addWidget(self.instructions_edit)
         right_layout.addWidget(instructions_group, 1)
 
-        # Guidelines
         guidelines_group = QGroupBox("Specific Guidelines & Rules")
         guidelines_layout = QVBoxLayout(guidelines_group)
         self.guidelines_list = QListWidget()
@@ -139,7 +146,6 @@ class AIExportDialog(QDialog):
         guidelines_layout.addLayout(guideline_buttons_layout)
         right_layout.addWidget(guidelines_group, 1)
 
-        # Golden Rules
         golden_rules_group = QGroupBox("Golden Rules")
         golden_rules_layout = QVBoxLayout(golden_rules_group)
         golden_rules_top_layout = QHBoxLayout()
@@ -168,14 +174,12 @@ class AIExportDialog(QDialog):
         self.button_box.accepted.connect(self._start_export)
         self.button_box.rejected.connect(self.reject)
         self.file_model.itemChanged.connect(self._on_item_changed)
-        # Loadouts
         self.loadout_combo.currentIndexChanged.connect(self._on_loadout_selected)
         self.save_loadout_button.clicked.connect(self._save_loadout)
         self.delete_loadout_button.clicked.connect(self._delete_loadout)
         self.add_guideline_button.clicked.connect(self._add_guideline)
         self.edit_guideline_button.clicked.connect(self._edit_guideline)
         self.remove_guideline_button.clicked.connect(self._remove_guideline)
-        # Golden Rules
         self.golden_rules_combo.currentIndexChanged.connect(self._on_golden_rule_set_selected)
         self.save_golden_rules_button.clicked.connect(self._save_golden_rule_set)
         self.delete_golden_rules_button.clicked.connect(self._delete_golden_rule_set)
@@ -193,7 +197,8 @@ class AIExportDialog(QDialog):
         for dirpath, dirnames, filenames in os.walk(self.project_path, topdown=True):
             dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
             parent_node = path_map.get(os.path.normpath(dirpath))
-            if parent_node is None: continue
+            if parent_node is None:
+                continue
             for dirname in sorted(dirnames):
                 dir_item = QStandardItem(dirname)
                 dir_item.setIcon(qta.icon('fa5.folder', color='grey'))
@@ -203,8 +208,10 @@ class AIExportDialog(QDialog):
                 parent_node.appendRow(dir_item)
                 path_map[os.path.join(dirpath, dirname)] = dir_item
             for filename in sorted(filenames):
-                if filename in ignore_files: continue
-                if "LICENSE" not in filename and not any(filename.lower().endswith(ext) for ext in include_extensions): continue
+                if filename in ignore_files:
+                    continue
+                if "LICENSE" not in filename and not any(filename.lower().endswith(ext) for ext in include_extensions):
+                    continue
                 file_item = QStandardItem(filename)
                 file_item.setIcon(qta.icon('fa5.file-alt', color='grey'))
                 file_item.setCheckable(True)
@@ -214,16 +221,21 @@ class AIExportDialog(QDialog):
         self.file_tree.expandToDepth(0)
 
     def _on_item_changed(self, item: QStandardItem):
-        if not item.isCheckable(): return
+        if not item.isCheckable():
+            return
         check_state = item.checkState()
         if item.hasChildren():
             for row in range(item.rowCount()):
-                if child := item.child(row): child.setCheckState(check_state)
-        if parent := item.parent():
+                if (child := item.child(row)):
+                    child.setCheckState(check_state)
+        if (parent := item.parent()):
             sibling_states = [parent.child(r).checkState() for r in range(parent.rowCount())]
-            if all(s == Qt.CheckState.Checked for s in sibling_states): parent.setCheckState(Qt.CheckState.Checked)
-            elif all(s == Qt.CheckState.Unchecked for s in sibling_states): parent.setCheckState(Qt.CheckState.Unchecked)
-            else: parent.setCheckState(Qt.CheckState.PartiallyChecked)
+            if all(s == Qt.CheckState.Checked for s in sibling_states):
+                parent.setCheckState(Qt.CheckState.Checked)
+            elif all(s == Qt.CheckState.Unchecked for s in sibling_states):
+                parent.setCheckState(Qt.CheckState.Unchecked)
+            else:
+                parent.setCheckState(Qt.CheckState.PartiallyChecked)
 
     def _get_checked_files(self) -> List[str]:
         checked_files = []
@@ -233,13 +245,15 @@ class AIExportDialog(QDialog):
         return checked_files
 
     def _recurse_get_checked(self, parent_item: QStandardItem, file_list: List[str]):
-        if parent_item.checkState() == Qt.CheckState.Unchecked: return
+        if parent_item.checkState() == Qt.CheckState.Unchecked:
+            return
         path = parent_item.data(Qt.ItemDataRole.UserRole)
         if path and os.path.isfile(path) and parent_item.checkState() == Qt.CheckState.Checked:
             file_list.append(path)
         if parent_item.hasChildren():
             for row in range(parent_item.rowCount()):
-                if child := parent_item.child(row): self._recurse_get_checked(child, file_list)
+                if (child := parent_item.child(row)):
+                    self._recurse_get_checked(child, file_list)
 
     def _load_prompt_source(self, prompt_type: str, filepath: str):
         if os.path.exists(filepath):
@@ -253,8 +267,10 @@ class AIExportDialog(QDialog):
         self.loadouts = settings_manager.get("ai_export_loadouts", {})
         self.prompt_sources = {PROMPT_TYPE_DEFAULT: DEFAULT_LOADOUTS}
         base_path = get_base_path()
-        self._load_prompt_source(PROMPT_TYPE_GENERATIVE, os.path.join(base_path, "assets", "prompts", "generative_prompts.json"))
-        self._load_prompt_source(PROMPT_TYPE_COMMUNITY, os.path.join(base_path, "assets", "prompts", "additional_prompts.json"))
+        self._load_prompt_source(PROMPT_TYPE_GENERATIVE, os.path.join(
+            base_path, "assets", "prompts", "generative_prompts.json"))
+        self._load_prompt_source(PROMPT_TYPE_COMMUNITY, os.path.join(
+            base_path, "assets", "prompts", "additional_prompts.json"))
         self.loadout_combo.clear()
         self.loadout_combo.addItem("--- Select a Loadout ---", None)
         self.loadout_combo.insertSeparator(self.loadout_combo.count())
@@ -268,7 +284,7 @@ class AIExportDialog(QDialog):
         self.loadout_combo.setCurrentIndex(0)
 
     def _add_prompts_to_combo(self, prefix: str, prompt_type: str):
-        if source := self.prompt_sources.get(prompt_type):
+        if (source := self.prompt_sources.get(prompt_type)):
             self.loadout_combo.insertSeparator(self.loadout_combo.count())
             for name in sorted(source.keys()):
                 self.loadout_combo.addItem(f"({prefix}) {name}", (prompt_type, name))
@@ -290,7 +306,8 @@ class AIExportDialog(QDialog):
         self.save_loadout_button.setText("Save As New...")
         self.save_loadout_button.setToolTip("Save the current configuration as a new custom loadout.")
         self.delete_loadout_button.setEnabled(is_user_loadout)
-        self.delete_loadout_button.setToolTip("Delete this custom loadout." if is_user_loadout else "Cannot delete built-in loadouts.")
+        self.delete_loadout_button.setToolTip("Delete this custom loadout." if is_user_loadout
+                                              else "Cannot delete built-in loadouts.")
         if is_user_loadout:
             self.save_loadout_button.setText(f"Update '{name}'")
             self.save_loadout_button.setToolTip(f"Update the custom loadout '{name}'.")
@@ -300,10 +317,13 @@ class AIExportDialog(QDialog):
         is_update = data and data[0] == PROMPT_TYPE_USER
         name_to_save = data[1] if is_update else None
         if not is_update:
-            name, ok = QInputDialog.getText(self, "Save Loadout As", "Enter a name for this new loadout:")
-            if not (ok and name): return
+            name, ok = QInputDialog.getText(self, "Save Loadout As",
+                                            "Enter a name for this new loadout:")
+            if not (ok and name):
+                return
             if name in self.loadouts or any(name in s for s in self.prompt_sources.values()):
-                QMessageBox.warning(self, "Name Exists", "A loadout with this name already exists."); return
+                QMessageBox.warning(self, "Name Exists", "A loadout with this name already exists.")
+                return
             name_to_save = name
         self.loadouts[name_to_save] = {
             "instructions": self.instructions_edit.toPlainText(),
@@ -312,11 +332,13 @@ class AIExportDialog(QDialog):
         settings_manager.set("ai_export_loadouts", self.loadouts)
         self._load_and_populate_prompts()
         new_index = self.loadout_combo.findData((PROMPT_TYPE_USER, name_to_save))
-        if new_index != -1: self.loadout_combo.setCurrentIndex(new_index)
+        if new_index != -1:
+            self.loadout_combo.setCurrentIndex(new_index)
         QMessageBox.information(self, "Success", f"Loadout '{name_to_save}' saved.")
 
     def _delete_loadout(self):
-        if not (data := self.loadout_combo.currentData()) or data[0] != PROMPT_TYPE_USER: return
+        if not (data := self.loadout_combo.currentData()) or data[0] != PROMPT_TYPE_USER:
+            return
         name_to_delete = data[1]
         reply = QMessageBox.question(self, "Confirm Delete", f"Delete the loadout '{name_to_delete}'?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -327,15 +349,18 @@ class AIExportDialog(QDialog):
 
     def _add_guideline(self):
         text, ok = QInputDialog.getText(self, "Add Guideline", "Enter new guideline:")
-        if ok and text: self.guidelines_list.addItem(QListWidgetItem(text))
+        if ok and text:
+            self.guidelines_list.addItem(QListWidgetItem(text))
 
     def _edit_guideline(self):
-        if not (item := self.guidelines_list.currentItem()): return
+        if not (item := self.guidelines_list.currentItem()):
+            return
         text, ok = QInputDialog.getText(self, "Edit Guideline", "Edit guideline:", text=item.text())
-        if ok and text: item.setText(text)
+        if ok and text:
+            item.setText(text)
 
     def _remove_guideline(self):
-        if item := self.guidelines_list.currentItem():
+        if (item := self.guidelines_list.currentItem()):
             self.guidelines_list.takeItem(self.guidelines_list.row(item))
 
     def _load_and_populate_golden_rule_sets(self):
@@ -352,8 +377,8 @@ class AIExportDialog(QDialog):
 
     def _on_golden_rule_set_selected(self, index):
         name = self.golden_rules_combo.currentText()
-        is_user_set = name != "Default Golden Rules"
-        if rules := self.golden_rule_sets.get(name):
+        is_user_set = name not in ["--- Select a Rule Set ---", "Default Golden Rules"]
+        if (rules := self.golden_rule_sets.get(name)):
             self.golden_rules_list.clear()
             self.golden_rules_list.addItems(rules)
         self.save_golden_rules_button.setText("Save As New...")
@@ -365,13 +390,15 @@ class AIExportDialog(QDialog):
 
     def _save_golden_rule_set(self):
         current_name = self.golden_rules_combo.currentText()
-        is_update = current_name != "--- Select a Rule Set ---" and current_name != "Default Golden Rules"
+        is_update = current_name not in ["--- Select a Rule Set ---", "Default Golden Rules"]
         name_to_save = current_name if is_update else None
         if not is_update:
             name, ok = QInputDialog.getText(self, "Save Rule Set", "Enter a name for this new rule set:")
-            if not (ok and name): return
+            if not (ok and name):
+                return
             if name in self.golden_rule_sets:
-                QMessageBox.warning(self, "Name Exists", "A rule set with this name already exists."); return
+                QMessageBox.warning(self, "Name Exists", "A rule set with this name already exists.")
+                return
             name_to_save = name
         rules = [self.golden_rules_list.item(i).text() for i in range(self.golden_rules_list.count())]
         self.golden_rule_sets[name_to_save] = rules
@@ -393,21 +420,25 @@ class AIExportDialog(QDialog):
 
     def _add_golden_rule(self):
         text, ok = QInputDialog.getText(self, "Add Golden Rule", "Enter new rule:")
-        if ok and text: self.golden_rules_list.addItem(QListWidgetItem(text))
+        if ok and text:
+            self.golden_rules_list.addItem(QListWidgetItem(text))
 
     def _edit_golden_rule(self):
-        if not (item := self.golden_rules_list.currentItem()): return
+        if not (item := self.golden_rules_list.currentItem()):
+            return
         text, ok = QInputDialog.getText(self, "Edit Golden Rule", "Edit rule:", text=item.text())
-        if ok and text: item.setText(text)
+        if ok and text:
+            item.setText(text)
 
     def _remove_golden_rule(self):
-        if item := self.golden_rules_list.currentItem():
+        if (item := self.golden_rules_list.currentItem()):
             self.golden_rules_list.takeItem(self.golden_rules_list.row(item))
 
     def _start_export(self):
         self.selected_files = self._get_checked_files()
         if not self.selected_files:
-            QMessageBox.warning(self, "No Files Selected", "Please select files to include."); return
+            QMessageBox.warning(self, "No Files Selected", "Please select files to include.")
+            return
         self.progress = QProgressDialog("Linting selected files...", "Cancel", 0, 0, self)
         self.progress.setWindowModality(Qt.WindowModality.WindowModal)
         self.progress.show()
@@ -421,7 +452,8 @@ class AIExportDialog(QDialog):
         proj_name = os.path.basename(self.project_path)
         sugg_path = os.path.join(os.path.expanduser("~"), f"{proj_name}_ai_export.md")
         fp, _ = QFileDialog.getSaveFileName(self, "Save AI Export File", sugg_path, "Markdown Files (*.md)")
-        if not fp: return
+        if not fp:
+            return
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
         try:
             instructions = self.instructions_edit.toPlainText()
