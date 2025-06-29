@@ -1,10 +1,10 @@
-PyQt6
+flake8
+GitPython
 jedi
+jsonschema
+Markdown
+pywin32
+PyQt6
 qtawesome
 requests
-GitPython
 winshell
-pywin32
-Markdown
-flake8
-jsonschema

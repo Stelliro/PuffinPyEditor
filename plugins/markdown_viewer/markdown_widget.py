@@ -6,6 +6,7 @@ from app_core.theme_manager import theme_manager
 from app_core.settings_manager import settings_manager
 from utils.logger import log
 
+
 class MarkdownViewerWidget(QWidget):
     """
     A widget that displays rendered Markdown content.
@@ -33,10 +34,12 @@ class MarkdownViewerWidget(QWidget):
             html = markdown(md_text, extensions=['fenced_code', 'tables'])
             self.browser.setHtml(html)
         except FileNotFoundError:
-            self.browser.setHtml(f"<h1>Error</h1><p>File not found: {filepath}</p>")
+            msg = f"<h1>Error</h1><p>File not found: {filepath}</p>"
+            self.browser.setHtml(msg)
         except Exception as e:
-            log.error(f"Error reading or rendering Markdown file {filepath}: {e}")
-            self.browser.setHtml(f"<h1>Error</h1><p>Could not render file: {e}</p>")
+            log.error(f"Error reading/rendering Markdown file {filepath}: {e}")
+            msg = f"<h1>Error</h1><p>Could not render file: {e}</p>"
+            self.browser.setHtml(msg)
 
     def set_markdown_content(self, md_text: str):
         """Sets the content from a string directly."""
@@ -53,7 +56,8 @@ class MarkdownViewerWidget(QWidget):
         bg_color = colors.get('editor.background', '#2b2b2b')
         fg_color = colors.get('editor.foreground', '#a9b7c6')
         accent_color = colors.get('accent', '#88c0d0')
-        line_highlight_bg = colors.get('editor.lineHighlightBackground', '#323232')
+        line_highlight_bg = colors.get(
+            'editor.lineHighlightBackground', '#323232')
         comment_color = colors.get('syntax.comment', '#808080')
         string_color = colors.get('syntax.string', '#6A8759')
 

@@ -78,7 +78,8 @@ class GitHubDialog(QDialog):
     def _connect_signals(self):
         self.github_manager.repos_ready.connect(self.populate_repo_list)
         self.github_manager.branches_ready.connect(self.populate_branch_list)
-        self.github_manager.operation_failed.connect(self._on_operation_failed)
+        self.github_manager.operation_failed.connect(
+            self._on_operation_failed)
         self.repo_list.currentItemChanged.connect(self.on_repo_selected)
         self.refresh_button.clicked.connect(self.github_manager.list_repos)
         self.clone_button.clicked.connect(self.on_clone_clicked)
@@ -91,7 +92,8 @@ class GitHubDialog(QDialog):
     def closeEvent(self, event):
         try:
             self.github_manager.repos_ready.disconnect(self.populate_repo_list)
-            self.github_manager.branches_ready.disconnect(self.populate_branch_list)
+            self.github_manager.branches_ready.disconnect(
+                self.populate_branch_list)
             self.github_manager.operation_failed.disconnect(
                 self._on_operation_failed)
         except TypeError:
@@ -104,7 +106,8 @@ class GitHubDialog(QDialog):
             self.user_label.setText(
                 f"Authenticated as: <b>{user_info['login']}</b>")
         else:
-            self.user_label.setText("<i>Authentication details not available.</i>")
+            self.user_label.setText(
+                "<i>Authentication details not available.</i>")
 
     def populate_repo_list(self, repos: List[Dict[str, Any]]):
         self.repo_list.clear()

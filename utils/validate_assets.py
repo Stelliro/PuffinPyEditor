@@ -2,7 +2,6 @@
 import os
 import json
 import re
-import jsonschema
 from typing import List, Dict, Any, Tuple
 
 # --- Configuration ---
@@ -90,6 +89,17 @@ def validate_key_completeness(all_themes: Dict, required_keys: set) -> List[str]
     """Checks if each theme defines all the keys required by the app."""
     _print_header("2. Color Key Completeness Validation")
     all_errors = []
+
+    # Manually add keys for custom-painted widgets that are not discoverable
+    # via the c() helper function in the main QSS.
+    custom_painted_widget_keys = {
+        "tree.indentationGuides.stroke", "tree.trace.color", "tree.trace.shadow",
+        "tree.node.color", "tree.node.fill", "list.hoverBackground",
+        "list.activeSelectionBackground", "list.activeSelectionForeground",
+        "list.inactiveSelectionBackground", "list.inactiveSelectionForeground",
+        "icon.foreground"
+    }
+    required_keys.update(custom_painted_widget_keys)
 
     if not required_keys:
         msg = (f"{bcolors.FAIL}Could not find required color keys "

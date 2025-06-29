@@ -2,7 +2,7 @@
 import os
 from PyQt6.QtWidgets import QMessageBox
 from PyQt6.QtCore import Qt, QObject
-from ui.editor_widget import EditorWidget
+# from ui.editor_widget import EditorWidget # This top-level import is removed
 from .output_panel import OutputPanel
 from .code_runner import CodeRunner
 
@@ -10,6 +10,10 @@ from .code_runner import CodeRunner
 class PythonRunnerPlugin(QObject):
     def __init__(self, main_window):
         super().__init__()
+        # Deferred import to prevent circular dependencies
+        from ui.editor_widget import EditorWidget
+        self.EditorWidgetClass = EditorWidget
+
         self.api = main_window.puffin_api
         self.main_window = self.api.get_main_window()
         self.code_runner = CodeRunner(self)
@@ -40,7 +44,7 @@ class PythonRunnerPlugin(QObject):
 
     def _run_script(self):
         editor = self.main_window.tab_widget.currentWidget()
-        if not isinstance(editor, EditorWidget):
+        if not isinstance(editor, self.EditorWidgetClass):
             return
         filepath = self.main_window.editor_tabs_data.get(editor, {}).get('filepath')
         if not filepath:

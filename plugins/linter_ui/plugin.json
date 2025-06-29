@@ -2,7 +2,7 @@
     "id": "linter_ui",
     "name": "Linter UI",
     "author": "PuffinPy Team",
-    "version": "1.0.0",
+    "version": "1.1.1",
     "description": "Provides the 'Problems' panel to display linter results from Flake8.",
     "entry_point": "plugin_main.py"
 }

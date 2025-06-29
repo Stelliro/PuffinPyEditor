@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem, QHeaderView, QWidget
 from PyQt6.QtCore import pyqtSignal, Qt
 from utils.logger import log
 
+
 class ProblemsPanel(QTreeWidget):
     """
     A widget that displays linting problems in a hierarchical tree view,
@@ -50,8 +51,10 @@ class ProblemsPanel(QTreeWidget):
                 continue
 
             file_node = QTreeWidgetItem(self)
-            file_node.setText(0, f"{os.path.basename(filepath)} ({len(problems)} issues)")
-            file_node.setData(0, Qt.ItemDataRole.UserRole, {'is_file_node': True})
+            file_node.setText(
+                0, f"{os.path.basename(filepath)} ({len(problems)} issues)")
+            file_node.setData(
+                0, Qt.ItemDataRole.UserRole, {'is_file_node': True})
             file_node.setFirstColumnSpanned(True)
 
             for problem in problems:

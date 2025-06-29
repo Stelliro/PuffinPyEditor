@@ -30,16 +30,14 @@ def safe_copy(source_dir, install_dir):
     """
     log("Starting safe copy process...")
     for root, dirs, files in os.walk(source_dir):
+        # Prevent os.walk from going into protected directories
+        dirs[:] = [d for d in dirs
+                   if os.path.relpath(os.path.join(root, d), source_dir)
+                   .replace(os.sep, '/') not in PROTECTED_ITEMS]
+
         # Process directories first
         for d in dirs:
-            src_path = os.path.join(root, d)
-            rel_path = os.path.relpath(src_path, source_dir)
-            # Use forward slashes for cross-platform comparison
-            if rel_path.replace(os.sep, '/') in PROTECTED_ITEMS:
-                log(f"Skipping protected directory: {rel_path}")
-                # Prevent os.walk from going into this directory
-                dirs.remove(d)
-                continue
+            rel_path = os.path.relpath(os.path.join(root, d), source_dir)
             dest_path = os.path.join(install_dir, rel_path)
             os.makedirs(dest_path, exist_ok=True)
 
@@ -60,7 +58,8 @@ def main():
     log("PuffinPy Updater started.")
 
     if len(sys.argv) < 3:
-        log("Error: Missing arguments. Usage: python updater.py <download_url> <install_dir>")
+        log("Error: Missing arguments. "
+            "Usage: python updater.py <download_url> <install_dir>")
         return
 
     download_url = sys.argv[1]
@@ -87,12 +86,16 @@ def main():
         log(f"Error: Failed to download update. {e}")
         return
 
-    backup_dir = os.path.join(install_dir, f"PuffinPyEditor_backup_{int(time.time())}")
+    backup_dir = os.path.join(install_dir,
+                              f"PuffinPyEditor_backup_{int(time.time())}")
     log(f"Creating backup at: {backup_dir}")
     try:
-        # Update ignore pattern to also ignore the temp update files
-        shutil.copytree(install_dir, backup_dir,
-                        ignore=shutil.ignore_patterns('PuffinPyEditor_backup_*', 'update_temp', '*.zip', '*.log', 'venv', '.git*'))
+        # Update ignore pattern to also ignore temp update files
+        ignore_patterns = shutil.ignore_patterns(
+            'PuffinPyEditor_backup_*', 'update_temp', '*.zip', '*.log',
+            'venv', '.git*'
+        )
+        shutil.copytree(install_dir, backup_dir, ignore=ignore_patterns)
     except Exception as e:
         log(f"Warning: Could not create full backup. {e}")
 
@@ -108,18 +111,17 @@ def main():
         if len(extracted_content) == 1:
             possible_root = os.path.join(temp_extract_dir, extracted_content[0])
             if os.path.isdir(possible_root):
-                log(f"Update content is in a single root folder: {extracted_content[0]}")
+                log(f"Update is in a root folder: {extracted_content[0]}")
                 source_dir = possible_root
 
         log(f"Replacing files in '{install_dir}' using safe copy method.")
-
         safe_copy(source_dir, install_dir)
-
         log("Update successfully installed.")
 
     except Exception as e:
         log(f"Error: Failed during installation. {e}")
         log("Attempting to restore from backup...")
+        # (Restore logic would go here if implemented)
         return
 
     finally:
@@ -129,7 +131,7 @@ def main():
         if os.path.exists(temp_extract_dir):
             shutil.rmtree(temp_extract_dir)
 
-    log("Update process finished. Relaunch the application to see the changes.")
+    log("Update process finished. Relaunch application to see the changes.")
 
 
 if __name__ == "__main__":

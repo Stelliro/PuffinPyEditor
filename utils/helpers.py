@@ -11,9 +11,11 @@ if sys.platform == "win32":
 
 def get_base_path():
     """
-    Returns the base path for the application, handling frozen executables.
-    For a frozen app, this is the directory of the executable.
-    For a source app, this is the project root.
+    Returns the application's base path for resource loading.
+
+    This handles the difference between running from source and a frozen
+    (e.g., PyInstaller) executable. For a frozen app, this is the directory
+    of the executable. For a source app, this is the project root.
     """
     if getattr(sys, 'frozen', False):
         # The application is frozen
@@ -25,8 +27,10 @@ def get_base_path():
 
 def get_startup_shortcut_path() -> Optional[str]:
     """
-    Gets the cross-platform path to the user's startup folder for creating shortcuts.
-    Returns None if the platform is not supported.
+    Gets the cross-platform path to the user's startup folder.
+
+    This is used for creating a shortcut to launch the app on system startup.
+    Returns None if the platform is not supported (currently only Windows).
     """
     if sys.platform == "win32":
         try:
@@ -41,7 +45,10 @@ def get_startup_shortcut_path() -> Optional[str]:
 def get_best_available_font(preferred_list: List[str]) -> Optional[str]:
     """
     Scans a preferred list of font families and returns the first one found
-    on the user's system. This is useful for setting sensible default fonts.
+    on the user's system.
+
+    This is useful for setting sensible default fonts for different themes
+    or operating systems.
 
     Args:
         preferred_list: A list of font family names, in order of preference.
@@ -51,7 +58,8 @@ def get_best_available_font(preferred_list: List[str]) -> Optional[str]:
     """
     if not isinstance(preferred_list, list):
         log.warning(
-            f"Font list provided is not a list: {preferred_list}. No font selected."
+            f"Font list provided is not a list: {preferred_list}. "
+            "No font selected."
         )
         return None
 

@@ -18,11 +18,13 @@ class PuffinDebugAPI:
 
         Args:
             tool_name: The name to be displayed on the tab.
-            widget_class: The QWidget class (not an instance) to be instantiated.
-                          The class constructor should accept the main PuffinAPI instance.
+            widget_class: The QWidget class (not an instance) to be
+                          instantiated. The class constructor should accept
+                          the main PuffinAPI instance.
         """
         if tool_name in self.registered_tools:
-            log.warning(f"Debug tool '{tool_name}' is already registered. Overwriting.")
+            log.warning(
+                f"Debug tool '{tool_name}' is already registered. Overwriting.")
         self.registered_tools[tool_name] = widget_class
         log.info(f"Registered new debug tool: {tool_name}")
         self._debug_window.add_tool_tab(tool_name, widget_class)

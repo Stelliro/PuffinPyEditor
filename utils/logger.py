@@ -3,7 +3,6 @@ import logging
 import os
 import platform
 from logging.handlers import RotatingFileHandler
-from typing import Optional
 
 APP_NAME = "PuffinPyEditor"
 ORG_NAME = "PuffinPyEditorProject"
@@ -18,14 +17,17 @@ def get_app_data_path() -> str:
     """
     system = platform.system()
     if system == "Windows":
-        # e.g., C:\Users\<user>\AppData\Local\PuffinPyEditorProject\PuffinPyEditor
-        path = os.path.join(os.environ.get('LOCALAPPDATA', ''), ORG_NAME, APP_NAME)
+        # e.g., C:\Users\<user>\AppData\Local\PuffinPyEditorProject\...
+        path = os.path.join(os.environ.get('LOCALAPPDATA', ''),
+                            ORG_NAME, APP_NAME)
     elif system == "Darwin":  # macOS
-        # e.g., /Users/<user>/Library/Application Support/PuffinPyEditorProject/PuffinPyEditor
-        path = os.path.join(os.path.expanduser('~/Library/Application Support'), ORG_NAME, APP_NAME)
+        # e.g., /Users/<user>/Library/Application Support/PuffinPyEditorProject/...
+        path = os.path.join(os.path.expanduser(
+            '~/Library/Application Support'), ORG_NAME, APP_NAME)
     else:  # Linux and other systems
-        # e.g., /home/<user>/.local/share/PuffinPyEditorProject/PuffinPyEditor
-        path = os.path.join(os.path.expanduser('~/.local/share'), ORG_NAME, APP_NAME)
+        # e.g., /home/<user>/.local/share/PuffinPyEditorProject/...
+        path = os.path.join(os.path.expanduser('~/.local/share'),
+                            ORG_NAME, APP_NAME)
 
     return path
 
@@ -53,7 +55,8 @@ def setup_logger(name: str = "PuffinPyEditor",
     logger.setLevel(log_level)
 
     formatter = logging.Formatter(
-        "%(asctime)s - %(levelname)s - [%(module)s.%(funcName)s:%(lineno)d] - %(message)s"
+        "%(asctime)s - %(levelname)s - "
+        "[%(module)s.%(funcName)s:%(lineno)d] - %(message)s"
     )
 
     # StreamHandler logs to the console
@@ -71,7 +74,9 @@ def setup_logger(name: str = "PuffinPyEditor",
         fh.setFormatter(formatter)
         logger.addHandler(fh)
     except Exception as e:
-        logger.error(f"Failed to create file handler for logging: {e}", exc_info=False)
+        logger.error(
+            f"Failed to create file handler for logging: {e}", exc_info=False
+        )
 
     logger.info(f"Logger initialized. Log file at: {LOG_FILE}")
     return logger

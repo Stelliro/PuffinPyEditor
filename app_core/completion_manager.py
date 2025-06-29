@@ -2,6 +2,7 @@
 import os
 import sys
 import shutil
+import html
 from typing import Any, Optional
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 import jedi
@@ -17,7 +18,7 @@ def find_python_interpreter_for_jedi() -> str:
 
     The priority is:
     1. User-defined path in settings.
-    2. A 'python.exe' bundled alongside the main PuffinPyEditor.exe (when frozen).
+    2. A 'python.exe' bundled alongside the main PuffinPyEditor.exe (frozen).
     3. The python.exe from the current venv (if running from source).
     4. The first 'python' found on the system's PATH.
 
@@ -26,8 +27,9 @@ def find_python_interpreter_for_jedi() -> str:
     """
     # 1. Prioritize user-defined path from settings
     user_path = settings_manager.get("python_interpreter_path")
-    if user_path and os.path.exists(user_path) and \
-            "PuffinPyEditor.exe" not in user_path:
+    if (user_path and
+            os.path.exists(user_path) and
+            "PuffinPyEditor.exe" not in user_path):
         log.info(f"Jedi: Using user-defined interpreter: {user_path}")
         return user_path
 
@@ -37,23 +39,29 @@ def find_python_interpreter_for_jedi() -> str:
         frozen_dir = os.path.dirname(sys.executable)
         local_python_path = os.path.join(frozen_dir, "python.exe")
         if os.path.exists(local_python_path):
-            log.info("Jedi: Found local python.exe in frozen app dir: "
-                     f"{local_python_path}")
+            log.info(
+                "Jedi: Found local python.exe in frozen app dir: "
+                f"{local_python_path}"
+            )
             return local_python_path
 
     # 3. When running from source, sys.executable is the venv python.
     # When frozen, sys.executable is PuffinPyEditor.exe, which we must avoid.
     if not getattr(sys, 'frozen', False):
         if "PuffinPyEditor.exe" not in sys.executable:
-            log.info("Jedi: Running from source, using sys.executable: "
-                     f"{sys.executable}")
+            log.info(
+                "Jedi: Running from source, using sys.executable: "
+                f"{sys.executable}"
+            )
             return sys.executable
 
     # 4. As a last resort, search the system's PATH.
     system_python = shutil.which("python")
     if system_python and "PuffinPyEditor.exe" not in system_python:
-        log.warning("Jedi: Falling back to system python on PATH: "
-                    f"{system_python}")
+        log.warning(
+            "Jedi: Falling back to system python on PATH: "
+            f"{system_python}"
+        )
         return system_python
 
     # 5. If no suitable python is found, return empty string.
@@ -78,22 +86,32 @@ class JediWorker(QObject):
         try:
             python_executable = find_python_interpreter_for_jedi()
             if not python_executable:
-                log.error("JediWorker could not be initialized: No valid "
-                          "Python interpreter found.")
+                log.error(
+                    "JediWorker could not be initialized: No valid "
+                    "Python interpreter found."
+                )
                 self.project = None
                 return
 
             if project_path and os.path.isdir(project_path):
-                self.project = jedi.Project(path=project_path,
-                                            environment_path=python_executable)
-                log.info(f"Jedi context set to project: {project_path} with "
-                         f"interpreter: {python_executable}")
+                self.project = jedi.Project(
+                    path=project_path,
+                    environment_path=python_executable
+                )
+                log.info(
+                    f"Jedi context set to project: {project_path} with "
+                    f"interpreter: {python_executable}"
+                )
             else:
                 # Fallback to a default project if no path is given
                 env = jedi.create_environment(python_executable, safe=False)
-                self.project = jedi.Project(os.path.expanduser("~"), environment=env)
-                log.info("Jedi context set to default environment with "
-                         f"interpreter: {python_executable}")
+                self.project = jedi.Project(
+                    os.path.expanduser("~"), environment=env
+                )
+                log.info(
+                    "Jedi context set to default environment with "
+                    f"interpreter: {python_executable}"
+                )
 
         except Exception as e:
             log.error(f"Failed to initialize Jedi project: {e}", exc_info=True)
@@ -105,11 +123,15 @@ class JediWorker(QObject):
             self.completions_ready.emit([])
             return
         try:
-            script = jedi.Script(code=source, path=filepath, project=self.project)
+            script = jedi.Script(
+                code=source, path=filepath, project=self.project
+            )
             completions = script.complete(line=line, column=col)
             completion_data = [{
-                'name': c.name, 'type': c.type,
-                'description': c.description, 'docstring': c.docstring(raw=True)
+                'name': c.name,
+                'type': c.type,
+                'description': c.description,
+                'docstring': c.docstring(raw=True)
             } for c in completions]
             self.completions_ready.emit(completion_data)
         except Exception as e:
@@ -122,13 +144,19 @@ class JediWorker(QObject):
             self.definition_ready.emit(None, -1, -1)
             return
         try:
-            script = jedi.Script(code=source, path=filepath, project=self.project)
+            script = jedi.Script(
+                code=source, path=filepath, project=self.project
+            )
             definitions = script.goto(line=line, column=col)
             if definitions:
                 d = definitions[0]
-                log.info(f"Jedi found definition for '{d.name}' at "
-                         f"{d.module_path}:{d.line}:{d.column}")
-                self.definition_ready.emit(str(d.module_path), d.line, d.column)
+                log.info(
+                    f"Jedi found definition for '{d.name}' at "
+                    f"{d.module_path}:{d.line}:{d.column}"
+                )
+                self.definition_ready.emit(
+                    str(d.module_path), d.line, d.column
+                )
             else:
                 log.info("Jedi could not find a definition.")
                 self.definition_ready.emit(None, -1, -1)
@@ -142,7 +170,9 @@ class JediWorker(QObject):
             self.signature_ready.emit(None)
             return
         try:
-            script = jedi.Script(code=source, path=filepath, project=self.project)
+            script = jedi.Script(
+                code=source, path=filepath, project=self.project
+            )
             signatures = script.get_signatures(line=line, column=col)
             self.signature_ready.emit(signatures[0] if signatures else None)
         except Exception as e:
@@ -150,8 +180,10 @@ class JediWorker(QObject):
             try:
                 self.signature_ready.emit(None)
             except RuntimeError:
-                log.warning("JediWorker was likely deleted during an exception. "
-                            "Ignoring signal emit error.")
+                log.warning(
+                    "JediWorker was likely deleted during an exception. "
+                    "Ignoring signal emit error."
+                )
 
 
 class CompletionManager(QObject):
@@ -191,13 +223,19 @@ class CompletionManager(QObject):
     def update_project_path(self, project_path: str):
         self._project_path_changed.emit(project_path)
 
-    def request_completions(self, source: str, line: int, col: int, filepath: str):
+    def request_completions(
+        self, source: str, line: int, col: int, filepath: str
+    ):
         self._completions_requested.emit(source, line, col, filepath)
 
-    def request_definition(self, source: str, line: int, col: int, filepath: str):
+    def request_definition(
+        self, source: str, line: int, col: int, filepath: str
+    ):
         self._definition_requested.emit(source, line, col, filepath)
 
-    def request_signature(self, source: str, line: int, col: int, filepath: str):
+    def request_signature(
+        self, source: str, line: int, col: int, filepath: str
+    ):
         self._signature_requested.emit(source, line, col, filepath)
 
     def _format_signature_for_tooltip(self, signature: Optional[Any]):
@@ -218,10 +256,10 @@ class CompletionManager(QObject):
             header = f"def {signature.name}({params_str})"
             docstring = signature.docstring(raw=True).strip()
 
-            # Escape HTML characters in the docstring
-            doc_html = docstring.replace('&', '&').replace('<', '<').replace('>', '>')
+            # Escape HTML characters in the docstring for safe rendering
+            doc_html = html.escape(docstring)
             doc_html = (
-                f"<pre style='white-space: pre-wrap; margin: 0; padding: 0; "
+                "<pre style='white-space: pre-wrap; margin: 0; padding: 0; "
                 f"font-family: inherit;'>{doc_html}</pre>"
             )
 
@@ -233,16 +271,17 @@ class CompletionManager(QObject):
                     <b style='color: {accent};'>{header}</b>
             """
             if docstring:
-                tooltip_html += f"""
-                    <hr style='border-color: {border}; border-style: solid; margin: 6px 0;' />
-                    <div style='color: {doc_fg};'>
-                        {doc_html}
-                    </div>
-                """
+                tooltip_html += (
+                    f"<hr style='border-color: {border}; "
+                    "border-style: solid; margin: 6px 0;' />"
+                    f"<div style='color: {doc_fg};'>{doc_html}</div>"
+                )
             tooltip_html += "</div>"
             self.hover_tip_ready.emit(tooltip_html.strip())
         except Exception as e:
-            log.error(f"Error formatting signature tooltip: {e}", exc_info=False)
+            log.error(
+                f"Error formatting signature tooltip: {e}", exc_info=False
+            )
             self.hover_tip_ready.emit("")
 
     def shutdown(self):
@@ -251,15 +290,17 @@ class CompletionManager(QObject):
             log.info("Shutting down CompletionManager thread.")
             # Disconnect signals to prevent any more work from being sent
             try:
-                self._completions_requested.disconnect(self.worker.get_completions)
-                self._definition_requested.disconnect(self.worker.get_definition)
-                self._signature_requested.disconnect(self.worker.get_signature)
-                self._project_path_changed.disconnect(self.worker.set_project)
+                self._completions_requested.disconnect()
+                self._definition_requested.disconnect()
+                self._signature_requested.disconnect()
+                self._project_path_changed.disconnect()
             except TypeError:
                 pass  # Signals may already be disconnected
 
             self.thread.quit()
             if not self.thread.wait(3000):  # Wait 3 seconds
-                log.warning("CompletionManager thread did not shut down "
-                            "gracefully. Terminating.")
+                log.warning(
+                    "CompletionManager thread did not shut down "
+                    "gracefully. Terminating."
+                )
                 self.thread.terminate()

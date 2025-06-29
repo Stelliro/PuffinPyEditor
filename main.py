@@ -1,27 +1,31 @@
 # PuffinPyEditor/main.py
 import sys
 import traceback
+import os
 
 # --- Core Imports ---
 from PyQt6.QtWidgets import QApplication
 from app_core.theme_manager import theme_manager
-from ui.main_window import MainWindow
+from app_core.file_handler import FileHandler
 from utils.logger import log
 
 
 def fallback_excepthook(exc_type, exc_value, exc_tb):
-    """A simple fallback excepthook to log uncaught exceptions if the main handler fails."""
+    """
+    A simple fallback excepthook to log uncaught exceptions.
+
+    This is a safety net in case the more advanced exception handler from the
+    debug tools plugin fails to load. It ensures that fatal errors are
+    always logged somewhere.
+    """
     log.critical("--- FATAL UNHANDLED EXCEPTION ---")
     tb_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     log.critical(f"Traceback:\n{tb_text}")
-    # Also print to stderr for visibility if the log file is not accessible
     print(f"FATAL ERROR:\n{tb_text}", file=sys.stderr)
     sys.__excepthook__(exc_type, exc_value, exc_tb)
 
 
 def main():
-    # Set the fallback hook immediately. It will be replaced by a better one
-    # if the application initializes correctly.
     sys.excepthook = fallback_excepthook
 
     DEBUG_MODE = "--debug" in sys.argv
@@ -37,17 +41,15 @@ def main():
     app.setOrganizationName("PuffinPyEditorProject")
 
     theme_manager.apply_theme_to_app(app)
+    file_handler = FileHandler()
 
-    # Separate initialization from execution for clarity and stability.
-    # This is a more robust pattern for starting a PyQt application.
+    from ui.main_window import MainWindow
+
     try:
-        main_window = MainWindow(debug_mode=DEBUG_MODE)
+        main_window = MainWindow(file_handler, theme_manager, debug_mode=DEBUG_MODE)
         log.info("MainWindow instance created successfully.")
     except Exception:
-        # The enhanced exception hook will now properly catch this
-        # because we are not swallowing the exception in a simple sys.exit().
         log.critical("A fatal error occurred during MainWindow initialization.")
-        # Re-raising the exception ensures it gets passed to the excepthook.
         raise
 
     main_window.show()

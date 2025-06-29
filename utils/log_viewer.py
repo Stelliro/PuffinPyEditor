@@ -12,7 +12,7 @@ import qtawesome as qta
 
 
 class LogViewerWindow(QMainWindow):
-    """A standalone application to view a log file in real-time with filtering."""
+    """A standalone app to view a log file in real-time with filtering."""
 
     def __init__(self, log_file_path):
         super().__init__()
@@ -21,13 +21,17 @@ class LogViewerWindow(QMainWindow):
         self.all_lines = []
         # Default to only showing ERROR and CRITICAL levels on startup
         self.active_levels = {'ERROR', 'CRITICAL'}
-        self.level_pattern = re.compile(r" - (DEBUG|INFO|WARNING|ERROR|CRITICAL) - ")
+        self.level_pattern = re.compile(
+            r" - (DEBUG|INFO|WARNING|ERROR|CRITICAL) - "
+        )
         # Regex to find file paths like [module.function:lineno]
         self.file_path_pattern = re.compile(r"\[([a-zA-Z0-9_.-]+):[0-9]+\]")
         self.project_root = self._get_project_root()
 
-        self.setWindowTitle(f"PuffinPy Log Viewer - {os.path.basename(log_file_path)}")
-        self.setMinimumSize(800, 500)  # Made the window smaller
+        self.setWindowTitle(
+            f"PuffinPy Log Viewer - {os.path.basename(log_file_path)}"
+        )
+        self.setMinimumSize(800, 500)
         self.setStyleSheet("background-color: #2D2A2E;")
 
         self.central_widget = QWidget()
@@ -40,7 +44,8 @@ class LogViewerWindow(QMainWindow):
         self.text_edit.setReadOnly(True)
         self.text_edit.setFont(QFont("Consolas", 10))
         self.text_edit.setStyleSheet(
-            "background-color: #1E1C21; color: #E0E0E0; border: none; padding: 5px;"
+            "background-color: #1E1C21; color: #E0E0E0; "
+            "border: none; padding: 5px;"
         )
         layout.addWidget(self.text_edit)
 
@@ -67,11 +72,11 @@ class LogViewerWindow(QMainWindow):
 
         # Level Filters
         controls_layout.addWidget(QLabel("Show Levels:"))
-        self.debug_check = self._create_filter_checkbox("DEBUG", default_checked=False)
-        self.info_check = self._create_filter_checkbox("INFO", default_checked=False)
-        self.warning_check = self._create_filter_checkbox("WARNING", default_checked=False)
-        self.error_check = self._create_filter_checkbox("ERROR", default_checked=True)
-        self.critical_check = self._create_filter_checkbox("CRITICAL", default_checked=True)
+        self.debug_check = self._create_filter_checkbox("DEBUG", False)
+        self.info_check = self._create_filter_checkbox("INFO", False)
+        self.warning_check = self._create_filter_checkbox("WARNING", False)
+        self.error_check = self._create_filter_checkbox("ERROR", True)
+        self.critical_check = self._create_filter_checkbox("CRITICAL", True)
 
         controls_layout.addWidget(self.debug_check)
         controls_layout.addWidget(self.info_check)
@@ -84,13 +89,10 @@ class LogViewerWindow(QMainWindow):
         self.autoscroll_check = QCheckBox("Auto-scroll")
         self.autoscroll_check.setChecked(True)
         clear_button = QPushButton("Clear")
-
-        # New Export for AI button
         export_button = QPushButton("Export for AI")
         export_button.setIcon(qta.icon('fa5s.robot'))
         export_button.setToolTip(
-            "Export the currently visible logs and the source code of any\n"
-            "files mentioned in them into a single file for AI analysis."
+            "Export visible logs and referenced source files for AI analysis."
         )
 
         controls_layout.addWidget(self.autoscroll_check)
@@ -102,18 +104,20 @@ class LogViewerWindow(QMainWindow):
         clear_button.clicked.connect(self.clear_log)
         export_button.clicked.connect(self._export_for_ai)
 
-    def _create_filter_checkbox(self, text, levels=None, default_checked=True):
+    def _create_filter_checkbox(self, text, default_checked=True):
         cb = QCheckBox(text)
         cb.setChecked(default_checked)
-        if levels is None:
-            levels = [text]
-        cb.toggled.connect(lambda checked, lvls=levels: self._on_filter_changed(checked, lvls))
+        cb.toggled.connect(
+            lambda checked, lvl=text: self._on_filter_changed(checked, [lvl])
+        )
         return cb
 
     def perform_initial_load(self):
         """Loads the initial view of the log file, tailing it for speed."""
         if not os.path.exists(self.log_file_path):
-            self.text_edit.setText(f"Waiting for log file: {self.log_file_path}...")
+            self.text_edit.setText(
+                f"Waiting for log file: {self.log_file_path}..."
+            )
             if not self.watcher.files():
                 self.watcher.addPath(self.log_file_path)
             return
@@ -133,7 +137,7 @@ class LogViewerWindow(QMainWindow):
             self.text_edit.setText(f"Error loading log file: {e}")
 
     def _load_full_log(self):
-        """Reads the entire log file into memory without blocking the UI on startup."""
+        """Reads the entire log file into memory after startup."""
         try:
             with open(self.log_file_path, 'r', encoding='utf-8') as f:
                 self.all_lines = f.readlines()
@@ -147,7 +151,7 @@ class LogViewerWindow(QMainWindow):
             with open(self.log_file_path, 'r', encoding='utf-8') as f:
                 current_size = f.seek(0, 2)
                 if current_size < self.last_pos:
-                    self.last_pos = 0
+                    self.last_pos = 0  # Log file was likely cleared
 
                 f.seek(self.last_pos)
                 new_content = f.read()
@@ -157,12 +161,17 @@ class LogViewerWindow(QMainWindow):
 
                     visible_new_lines = self._filter_lines(new_lines)
                     if visible_new_lines:
-                        self.text_edit.moveCursor(self.text_edit.textCursor().MoveOperation.End)
-                        self.text_edit.insertPlainText("\n".join(visible_new_lines) + "\n")
+                        cursor = self.text_edit.textCursor()
+                        cursor.movePosition(cursor.MoveOperation.End)
+                        self.text_edit.setTextCursor(cursor)
+                        self.text_edit.insertPlainText(
+                            "\n".join(visible_new_lines) + "\n"
+                        )
                 self.last_pos = f.tell()
 
             if self.autoscroll_check.isChecked():
-                self.text_edit.verticalScrollBar().setValue(self.text_edit.verticalScrollBar().maximum())
+                v_bar = self.text_edit.verticalScrollBar()
+                v_bar.setValue(v_bar.maximum())
         except Exception as e:
             print(f"Error updating log: {e}")
             self.last_pos = 0
@@ -192,13 +201,15 @@ class LogViewerWindow(QMainWindow):
         visible_lines = self._filter_lines(self.all_lines)
         self.text_edit.setText("\n".join(visible_lines))
         if self.autoscroll_check.isChecked():
-            self.text_edit.verticalScrollBar().setValue(self.text_edit.verticalScrollBar().maximum())
+            v_bar = self.text_edit.verticalScrollBar()
+            v_bar.setValue(v_bar.maximum())
 
     def _export_for_ai(self):
         """Gathers visible logs and associated source files for AI analysis."""
         visible_log_content = self.text_edit.toPlainText()
         if not visible_log_content.strip():
-            QMessageBox.warning(self, "Empty Log", "There is no visible log content to export.")
+            QMessageBox.warning(self, "Empty Log",
+                                "There is no visible log content to export.")
             return
 
         # Find unique source files mentioned in the logs
@@ -206,32 +217,32 @@ class LogViewerWindow(QMainWindow):
         for match in self.file_path_pattern.finditer(visible_log_content):
             module_path = match.group(1)
             # Convert module path (e.g., app_core.logger) to file path
-            file_path = os.path.join(self.project_root, *module_path.split('.')) + ".py"
+            file_path = os.path.join(self.project_root, *module_path.split('.'))
+            file_path += ".py"
             if os.path.exists(file_path):
                 files_to_include.add(os.path.normpath(file_path))
 
         sugg_path = os.path.join(os.path.expanduser("~"), "puffin_debug_export.md")
-        filepath, _ = QFileDialog.getSaveFileName(self, "Save Debug Export", sugg_path, "Markdown Files (*.md)")
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, "Save Debug Export", sugg_path, "Markdown Files (*.md)"
+        )
         if not filepath:
             return
 
-        # Build the export content
         export_content = [
-            "# PuffinPyEditor Debugging Export",
-            "## AI Instructions",
-            "Analyze the following log output and the associated source code files to identify the root cause of the error. Provide a detailed explanation and a suggested fix.",
-            "---",
-            "## Visible Log Output",
-            "```log",
-            visible_log_content,
-            "```",
-            "---",
-            "## Included File Contents"
+            "# PuffinPyEditor Debugging Export", "## AI Instructions",
+            "Analyze the following log output and the associated source code "
+            "files to identify the root cause of the error. Provide a "
+            "detailed explanation and a suggested fix.", "---",
+            "## Visible Log Output", "```log", visible_log_content, "```",
+            "---", "## Included File Contents"
         ]
 
         for source_file in sorted(list(files_to_include)):
-            relative_path = os.path.relpath(source_file, self.project_root).replace(os.sep, '/')
-            export_content.append(f"\n### File: `{relative_path}`\n")
+            rel_path = os.path.relpath(
+                source_file, self.project_root
+            ).replace(os.sep, '/')
+            export_content.append(f"\n### File: `{rel_path}`\n")
             export_content.append("```python")
             try:
                 with open(source_file, 'r', encoding='utf-8') as f:
@@ -240,13 +251,16 @@ class LogViewerWindow(QMainWindow):
                 export_content.append(f"# Error reading file: {e}")
             export_content.append("```")
 
-        # Write to file
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.write("\n".join(export_content))
-            QMessageBox.information(self, "Export Complete", f"Debug information successfully exported to:\n{filepath}")
+            QMessageBox.information(
+                self, "Export Complete",
+                f"Debug information successfully exported to:\n{filepath}"
+            )
         except IOError as e:
-            QMessageBox.critical(self, "Export Failed", f"Could not write to file: {e}")
+            QMessageBox.critical(self, "Export Failed",
+                                 f"Could not write to file: {e}")
 
     def clear_log(self):
         self.text_edit.clear()
@@ -265,7 +279,8 @@ if __name__ == '__main__':
         dummy_log_path = os.path.join(os.getcwd(), "dummy_app.log")
         if not os.path.exists(dummy_log_path):
             with open(dummy_log_path, 'w') as f:
-                f.write("2025-01-01 12:00:00,000 - INFO - [test.main:1] - This is a dummy log file.\n")
+                f.write("2025-01-01 12:00:00,000 - INFO - "
+                        "[test.main:1] - This is a dummy log file.\n")
         log_path = dummy_log_path
     else:
         log_path = sys.argv[1]

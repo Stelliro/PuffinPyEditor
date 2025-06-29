@@ -1,0 +1,289 @@
+# PuffinPyEditor/plugins/project_explorer/project_explorer_panel.py
+import os
+from functools import partial
+
+from PyQt6.QtGui import (QFileSystemModel, QPainter, QPen, QColor,
+                         QPainterPath, QFont)
+from PyQt6.QtWidgets import (QTreeView, QMenu, QInputDialog, QWidget,
+                             QVBoxLayout, QFileIconProvider, QMessageBox,
+                             QStyledItemDelegate, QLabel)
+from PyQt6.QtCore import (QDir, Qt, pyqtSignal, QModelIndex, QPoint, QRect,
+                        QPointF, QRectF, QTimer, QSize, QSortFilterProxyModel)
+import qtawesome as qta
+
+# Import the necessary classes for type hinting
+from app_core.file_handler import FileHandler
+from app_core.theme_manager import ThemeManager 
+from utils.logger import log
+
+
+class CustomFileIconProvider(QFileIconProvider):
+    # This class is correct. No changes needed.
+    def __init__(self, theme_manager: "ThemeManager"):
+        super().__init__()
+        self.theme_manager = theme_manager
+        self._icon_map = {".py": "mdi.language-python", ".js": "mdi.language-javascript", ".ts": "mdi.language-typescript", ".java": "mdi.language-java", ".cs": "mdi.language-csharp", ".cpp": "mdi.language-cpp", ".hpp": "mdi.language-cpp", ".h": "mdi.language-cpp", ".rs": "mdi.language-rust", ".html": "mdi.language-html5", ".css": "mdi.language-css3", ".scss": "mdi.language-css3", ".json": "mdi.code-json", ".md": "mdi.markdown", ".yaml": "mdi.yaml", ".yml": "mdi.yaml", ".xml": "mdi.xml", ".gitignore": "mdi.git", ".git": "mdi.git", "Dockerfile": "mdi.docker", ".dockerignore": "mdi.docker", ".txt": "mdi.file-document-outline", ".log": "mdi.file-document-outline", "__pycache__": "fa5s.archive", "venv": "fa5s.box-open", ".venv": "fa5s.box-open", "dist": "fa5s.box-open", "node_modules": "mdi.folder-npm-outline"}
+
+    def icon(self, fileInfo):
+        colors = self.theme_manager.current_theme_data.get('colors', {})
+        base_color = colors.get('icon.foreground', '#d0d0d0')
+        color_palette = {".py": "#4B8BBE", ".js": "#F7DF1E", ".ts": "#3178C6", ".java": "#B07219", ".cs": "#68217A", ".cpp": "#689AD6", ".hpp": "#689AD6", ".h": "mdi.language-cpp", ".rs": "#DEA584", ".html": "#E34F26", ".css": "#1572B6", ".scss": "#1572B6", ".json": "#FBC02D", ".md": "#90A4AE", ".yaml": "#A0A0A0", ".yml": "#A0A0A0", ".xml": "#009900", ".gitignore": "#F44336", ".git": "mdi.git", "Dockerfile": "#2496ED", ".dockerignore": "mdi.docker", "__pycache__": "#546E7A", "venv": "fa5s.box-open", ".venv": "fa5s.box-open", "dist": "fa5s.box-open", "node_modules": "mdi.folder-npm-outline"}
+        file_name = fileInfo.fileName()
+        if fileInfo.isDir():
+            if file_name in self._icon_map: return qta.icon(self._icon_map[file_name], color=color_palette.get(file_name, base_color))
+            return qta.icon('mdi.folder-outline', color=base_color)
+        if file_name in self._icon_map: return qta.icon(self._icon_map[file_name], color=color_palette.get(file_name, base_color))
+        _, ext = os.path.splitext(file_name)
+        if ext in self._icon_map: return qta.icon(self._icon_map[ext], color=color_palette.get(ext, base_color))
+        return qta.icon('mdi.file-outline', color=base_color)
+
+class TreeViewDelegate(QStyledItemDelegate):
+    def __init__(self, tree_view, theme_manager):
+        super().__init__(tree_view)
+        self.tree = tree_view
+        self.theme_manager = theme_manager
+
+    def _get_depth(self, index: QModelIndex) -> int:
+        depth = 0; p = index.parent()
+        while p.isValid(): depth += 1; p = p.parent()
+        return depth
+
+    def _has_siblings_below(self, model, index: QModelIndex) -> bool:
+        return index.row() < model.rowCount(index.parent()) - 1
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        size.setHeight(size.height() + 10)
+        return size
+
+    def paint(self, painter: QPainter, option: 'QStyleOptionViewItem', index: QModelIndex):
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        colors = self.theme_manager.current_theme_data.get('colors', {})
+        bus_color = QColor(colors.get('tree.indentationGuides.stroke', '#5c6370'))
+        trace_color = QColor(colors.get('tree.trace.color', '#be5046'))
+        
+        indent, model = self.tree.indentation(), self.tree.model()
+        depth = self._get_depth(index)
+        
+        rect = option.rect
+        y_center = rect.center().y()
+        kink_size = 6.0
+        new_y_center = y_center + kink_size
+        
+        content_start_x = depth * indent + indent
+        
+        if option.state & self.tree.style().StateFlag.State_Selected:
+            highlight_rect = QRect(rect)
+            highlight_rect.setLeft(content_start_x - 4)
+            painter.fillRect(highlight_rect, option.palette.highlight())
+
+        opacity = max(0.4, 1.0 - depth * 0.15)
+        faded_bus_color = QColor(bus_color); faded_bus_color.setAlphaF(opacity * 0.7)
+        faded_trace_color = QColor(trace_color); faded_trace_color.setAlphaF(opacity)
+        
+        painter.setPen(QPen(faded_bus_color, 1.0))
+        parent_index = index.parent()
+        for i in range(depth):
+            if self._has_siblings_below(model, parent_index):
+                parent_bus_x = i * indent + indent / 2
+                painter.drawLine(QPointF(parent_bus_x, rect.top()), QPointF(parent_bus_x, rect.bottom()))
+            parent_index = parent_index.parent()
+        
+        x_bus_line = depth * indent + indent / 2
+        
+        p1 = QPointF(x_bus_line, y_center)
+        p2 = QPointF(p1.x() + kink_size, y_center)
+        p3 = QPointF(p2.x() + kink_size, new_y_center)
+        
+        trace_path = QPainterPath(p1); trace_path.lineTo(p2); trace_path.lineTo(p3)
+        painter.setPen(QPen(faded_trace_color, 1.2, cap=Qt.PenCapStyle.RoundCap, join=Qt.PenJoinStyle.RoundJoin))
+        painter.drawPath(trace_path)
+        
+        final_seg_end_x = content_start_x + self.tree.iconSize().width() / 2 
+        
+        source_index = model.mapToSource(index) if isinstance(model, QSortFilterProxyModel) else index
+        is_folder = self.tree.model().sourceModel().isDir(source_index) if isinstance(model, QSortFilterProxyModel) else model.isDir(source_index)
+
+        if is_folder:
+            bus_height = 3.5
+            bus_rect = QRectF(p3.x(), p3.y() - bus_height / 2, final_seg_end_x - p3.x(), bus_height)
+            painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(faded_trace_color)
+            painter.drawRect(bus_rect)
+        else:
+            painter.setPen(QPen(faded_trace_color, 1.2, cap=Qt.PenCapStyle.RoundCap))
+            painter.drawLine(p3, QPointF(final_seg_end_x, p3.y()))
+            
+        painter.setPen(Qt.PenStyle.NoPen); painter.setBrush(faded_bus_color)
+        painter.drawRect(QRectF(x_bus_line - 2, y_center - 2, 4, 4))
+        
+        if model.hasChildren(index):
+            expander_char = "▼" if self.tree.isExpanded(index) else "▶"
+            expander_rect = QRect(int(x_bus_line - 6), int(y_center - 8), 12, 16)
+            painter.setPen(faded_trace_color)
+            painter.drawText(expander_rect, Qt.AlignmentFlag.AlignCenter, expander_char)
+
+        content_rect = QRect(option.rect); content_rect.setLeft(content_start_x)
+        content_rect.moveTop(int(new_y_center - rect.height() / 2))
+        
+        icon = index.data(Qt.ItemDataRole.DecorationRole)
+        text = index.data(Qt.ItemDataRole.DisplayRole)
+        
+        if icon:
+            icon_size = self.tree.iconSize()
+            icon_rect = QRect(content_rect.left() + 4, content_rect.center().y() - icon_size.height() // 2, icon_size.width(), icon_size.height())
+            icon.paint(painter, icon_rect)
+            content_rect.setLeft(icon_rect.right() + 4)
+            
+        text_color = option.palette.highlightedText().color() if (option.state & self.tree.style().StateFlag.State_Selected) else option.palette.text().color()
+        painter.setPen(text_color)
+        font = index.data(Qt.ItemDataRole.FontRole)
+        if font: painter.setFont(font)
+        painter.drawText(content_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+        painter.restore()
+
+class FileTree(QTreeView):
+    def __init__(self, model, theme_manager: ThemeManager, parent=None):
+        super().__init__(parent)
+        self.setModel(model)
+        self.theme_manager = theme_manager
+        
+        self.delegate = TreeViewDelegate(self, self.theme_manager)
+        self.setItemDelegate(self.delegate)
+        
+        self.setAnimated(True)
+        self.setIndentation(15)
+        self.setIconSize(QSize(16, 16))
+        self.setSortingEnabled(True)
+        self.sortByColumn(0, Qt.SortOrder.AscendingOrder)
+        self.setHeaderHidden(True)
+        self.setDragDropMode(self.DragDropMode.InternalMove)
+        self.setRootIsDecorated(True)
+        
+        for i in range(1, self.model().columnCount()): self.setColumnHidden(i, True)
+
+    def update_theme(self, colors):
+        style = f""" QTreeView {{ background-color: transparent; border: none; outline: 0px; }} """
+        self.setStyleSheet(style)
+        self.viewport().update()
+
+class FileTreeViewWidget(QWidget):
+    file_open_requested = pyqtSignal(str)
+    file_to_open_created = pyqtSignal(str)
+
+    def __init__(self, file_handler: FileHandler, theme_manager: ThemeManager, parent=None):
+        super().__init__(parent)
+        self.file_handler, self.theme_manager, self.project_root_path = file_handler, theme_manager, None
+        self._setup_ui()
+        self._connect_signals()
+        self.update_theme()
+
+    def _setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        self.file_system_model = QFileSystemModel(self)
+        self.icon_provider = CustomFileIconProvider(self.theme_manager)
+        self.file_system_model.setIconProvider(self.icon_provider)
+        self.file_system_model.setFilter(QDir.Filter.AllDirs | QDir.Filter.NoDotAndDotDot | QDir.Filter.AllEntries)
+        
+        self.tree_view = FileTree(self.file_system_model, self.theme_manager, self)
+        main_layout.addWidget(self.tree_view)
+        
+    def _connect_signals(self):
+        self.tree_view.doubleClicked.connect(self._on_item_double_clicked)
+        self.tree_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree_view.customContextMenuRequested.connect(self._show_context_menu)
+
+    def update_theme(self):
+        colors = self.theme_manager.current_theme_data.get('colors', {})
+        self.tree_view.update_theme(colors)
+        if self.project_root_path:
+            self.icon_provider.project_root_path = self.project_root_path
+        self.tree_view.viewport().update()
+
+    def set_project_root(self, path: str | None):
+        if path and QDir(path).exists():
+            self.project_root_path = os.path.normpath(path)
+            self.icon_provider.project_root_path = self.project_root_path
+            
+            parent_dir = os.path.dirname(self.project_root_path)
+            project_basename = os.path.basename(self.project_root_path)
+            
+            # Handle cases like "C:\" where the parent is the same or empty.
+            if not parent_dir or parent_dir == self.project_root_path:
+                root_index = self.file_system_model.setRootPath(self.project_root_path)
+                self.tree_view.setRootIndex(root_index)
+                return
+            
+            self.tree_view.setUpdatesEnabled(False)
+            
+            self.file_system_model.setRootPath(parent_dir)
+            root_view_index = self.file_system_model.index(parent_dir)
+            self.tree_view.setRootIndex(root_view_index)
+            
+            project_model_index = None
+            for i in range(self.file_system_model.rowCount(root_view_index)):
+                index = self.file_system_model.index(i, 0, root_view_index)
+                if self.file_system_model.fileName(index) == project_basename:
+                    self.tree_view.setRowHidden(i, root_view_index, False)
+                    project_model_index = index
+                else:
+                    self.tree_view.setRowHidden(i, root_view_index, True)
+
+            if project_model_index and project_model_index.isValid():
+                self.tree_view.expand(project_model_index)
+            
+            self.tree_view.setUpdatesEnabled(True)
+        else:
+            self.project_root_path = None
+            self.file_system_model.setRootPath("")
+            self.tree_view.setRootIndex(QModelIndex())
+
+    def _on_item_double_clicked(self, index: QModelIndex):
+        if index.isValid() and not self.file_system_model.isDir(index):
+            self.file_open_requested.emit(self.file_system_model.filePath(index))
+
+    def _show_context_menu(self, position: QPoint):
+        index = self.tree_view.indexAt(position)
+        clicked_path = self.file_system_model.filePath(index) if index.isValid() else self.project_root_path
+        if not clicked_path: return
+        target_dir = clicked_path if os.path.isdir(clicked_path) else os.path.dirname(clicked_path)
+        menu = QMenu()
+        menu.addAction(qta.icon('mdi.file-plus-outline'), "New File...", partial(self._action_new_file, target_dir))
+        menu.addAction(qta.icon('mdi.folder-plus-outline'), "New Folder...", partial(self._action_new_folder, target_dir))
+        if index.isValid():
+            menu.addSeparator()
+            menu.addAction(qta.icon('mdi.pencil-outline'), "Rename...", partial(self._action_rename, clicked_path))
+            menu.addAction(qta.icon('mdi.trash-can-outline', color='crimson'), "Delete", partial(self._action_delete, clicked_path))
+            menu.addSeparator()
+            if os.path.isdir(clicked_path): pass
+            menu.addSeparator()
+            menu.addAction(qta.icon('mdi.folder-search-outline'), "Reveal in File Explorer", partial(self.file_handler.reveal_in_explorer, clicked_path))
+        menu.exec(self.tree_view.viewport().mapToGlobal(position))
+    
+    # ... other action methods ...
+    def _action_new_file(self, base_path: str):
+        name, ok = QInputDialog.getText(self, "New File", "Enter file name:")
+        if ok and name:
+            path = os.path.join(base_path, name)
+            success, error = self.file_handler.create_file(path)
+            if success: self.file_to_open_created.emit(path)
+            else: QMessageBox.warning(self, "Error", error)
+    def _action_new_folder(self, base_path: str):
+        name, ok = QInputDialog.getText(self, "New Folder", "Enter folder name:")
+        if ok and name:
+            success, error = self.file_handler.create_folder(os.path.join(base_path, name))
+            if not success: QMessageBox.warning(self, "Error", error)
+    def _action_rename(self, path: str):
+        name, ok = QInputDialog.getText(self, "Rename", "Enter new name:", text=os.path.basename(path))
+        if ok and name and name != os.path.basename(path):
+            success, result = self.file_handler.rename_item(path, name)
+            if not success: QMessageBox.warning(self, "Error", result)
+    def _action_delete(self, path: str):
+        thing = 'folder' if os.path.isdir(path) else 'file'
+        if QMessageBox.question(self, "Confirm Delete", f"Are you sure you want to permanently delete this {thing}?\n\n'{os.path.basename(path)}'", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel) == QMessageBox.StandardButton.Yes:
+            success, error = self.file_handler.delete_item(path)
+            if not success: QMessageBox.warning(self, "Error", error)

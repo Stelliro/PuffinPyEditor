@@ -13,15 +13,18 @@ class AIToolsPlugin:
         )
 
     def show_export_dialog(self):
-        project_path = self.api.get_manager("project").get_active_project_path()
+        project_manager = self.api.get_manager("project")
+        project_path = project_manager.get_active_project_path()
         if not project_path:
-            self.api.show_message("info", "No Project Open",
-                                  "Please open a project to use the AI Export tool.")
+            self.api.show_message(
+                "info", "No Project Open",
+                "Please open a project to use the AI Export tool."
+            )
             return
 
         dialog = AIExportDialog(
             project_path,
-            self.api.get_manager("project"),
+            project_manager,
             self.api.get_manager("linter"),
             self.api.get_main_window()
         )

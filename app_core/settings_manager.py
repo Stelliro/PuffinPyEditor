@@ -1,7 +1,7 @@
 # PuffinPyEditor/app_core/settings_manager.py
 import json
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict
 from utils.logger import log, get_app_data_path
 
 # Use the same application data path for the settings file to ensure it's
@@ -42,7 +42,6 @@ DEFAULT_SETTINGS = {
     "source_control_repos": [],
     "active_update_repo_id": None,
     "plugins_distro_repo": "Stelliro/puffin-plugins",
-    "run_in_background": False,
     "ai_export_loadouts": {},
     "ai_export_golden_rules": {
         "Default Golden Rules": [
@@ -51,11 +50,11 @@ DEFAULT_SETTINGS = {
             "Only edit and add features, the only features should stay unless "
             "asked to be removed, or may be completely redundant.",
             "any scripts over 1000 lines, please write in a new response.",
-            "multiple scripts together exceeding 2000 lines together need to be "
-            "separated into smaller responses, (example: these scripts have "
-            "2340 lines together I'm going to separate it into 2 messages "
-            "that way i dont lose formatting and dont accidentally remove "
-            "any features)"
+            "multiple scripts together exceeding 2000 lines together need to "
+            "be separated into smaller responses, (example: these scripts "
+            "have 2340 lines together I'm going to separate it into 2 "
+            "messages that way i dont lose formatting and dont accidentally "
+            "remove any features)"
         ]
     },
     "cleanup_after_build": True,
@@ -80,7 +79,8 @@ class SettingsManager:
                 # Migration for old setting name
                 if "github_pat" in loaded_settings:
                     if "github_access_token" not in loaded_settings:
-                        loaded_settings["github_access_token"] = loaded_settings.pop("github_pat")
+                        loaded_settings["github_access_token"] = \
+                            loaded_settings.pop("github_pat")
                     else:
                         del loaded_settings["github_pat"]
                     log.info("Migrated old 'github_pat' setting.")
@@ -90,8 +90,10 @@ class SettingsManager:
                 settings.update(loaded_settings)
                 return settings
             else:
-                log.info(f"Settings file not found. Creating with defaults "
-                         f"at: {self.settings_file}")
+                log.info(
+                    f"Settings file not found. Creating with defaults "
+                    f"at: {self.settings_file}"
+                )
                 self._save_settings(DEFAULT_SETTINGS.copy())
                 return DEFAULT_SETTINGS.copy()
         except (json.JSONDecodeError, IOError) as e:
@@ -128,8 +130,8 @@ class SettingsManager:
 
     def set(self, key: str, value: Any, save_immediately: bool = True):
         """
-        Sets a setting value by key.
 
+        Sets a setting value by key.
         Args:
             key: The key of the setting to set.
             value: The new value for the setting.

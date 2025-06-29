@@ -53,7 +53,9 @@ class PythonSyntaxHighlighter(QSyntaxHighlighter):
         formats["className"].setFontWeight(QFont.Weight.Bold)
 
         formats["functionName"] = QTextCharFormat()
-        formats["functionName"].setForeground(get_color("functionName", "#83c092"))
+        formats["functionName"].setForeground(
+            get_color("functionName", "#83c092")
+        )
 
         formats["comment"] = QTextCharFormat()
         formats["comment"].setForeground(get_color("comment", "#5f6c6d"))
@@ -75,19 +77,23 @@ class PythonSyntaxHighlighter(QSyntaxHighlighter):
         keywords = [
             r'\bdef\b', r'\bclass\b', r'\bif\b', r'\belif\b', r'\belse\b',
             r'\bfor\b', r'\bwhile\b', r'\breturn\b', r'\byield\b', r'\bpass\b',
-            r'\bcontinue\b', r'\bbreak\b', r'\bimport\b', r'\bfrom\b', r'\bas\b',
-            r'\btry\b', r'\bexcept\b', r'\bfinally\b', r'\braise\b', r'\bwith\b',
-            r'\bassert\b', r'\bdel\b', r'\bglobal\b', r'\bnonlocal\b', r'\bin\b',
-            r'\bis\b', r'\blambda\b', r'\bnot\b', r'\bor\b', r'\band\b',
-            r'\bTrue\b', r'\bFalse\b', r'\bNone\b', r'\basync\b', r'\bawait\b'
+            r'\bcontinue\b', r'\bbreak\b', r'\bimport\b', r'\bfrom\b',
+            r'\bas\b', r'\btry\b', r'\bexcept\b', r'\bfinally\b', r'\braise\b',
+            r'\bwith\b', r'\bassert\b', r'\bdel\b', r'\bglobal\b',
+            r'\bnonlocal\b', r'\bin\b', r'\bis\b', r'\blambda\b', r'\bnot\b',
+            r'\bor\b', r'\band\b', r'\bTrue\b', r'\bFalse\b', r'\bNone\b',
+            r'\basync\b', r'\bawait\b'
         ]
-        self.highlighting_rules += [(QRegularExpression(p), formats["keyword"]) for p in keywords]
+        self.highlighting_rules += [
+            (QRegularExpression(p), formats["keyword"]) for p in keywords
+        ]
 
         self.highlighting_rules.extend([
             (QRegularExpression(r'\bself\b'), formats["self"]),
             (QRegularExpression(r'@[A-Za-z0-9_]+'), formats["decorator"]),
             (QRegularExpression(r'\b[A-Z][A-Za-z0-9_]*'), formats["className"]),
-            (QRegularExpression(r'\b[a-z_][A-Za-z0-9_]*(?=\()'), formats["functionName"]),
+            (QRegularExpression(r'\b[a-z_][A-Za-z0-9_]*(?=\()'),
+             formats["functionName"]),
             (QRegularExpression(r'[+\-*/%=<>!&|^~]'), formats["operator"]),
             (QRegularExpression(r'[{}()\[\]]'), formats["brace"]),
             (QRegularExpression(r'\b[0-9]+\b'), formats["number"]),
@@ -112,31 +118,43 @@ class PythonSyntaxHighlighter(QSyntaxHighlighter):
 
         start_index = 0
         if in_multiline:
-            start_index = self._apply_multiline_format(text, self.tri_double_quote_start, 1, 0)
+            start_index = self._apply_multiline_format(
+                text, self.tri_double_quote_start, 1, 0
+            )
             if start_index == -1:
                 return
 
-        self._apply_multiline_format(text, self.tri_double_quote_start, 1, start_index)
-        self._apply_multiline_format(text, self.tri_single_quote_start, 1, start_index)
+        self._apply_multiline_format(
+            text, self.tri_double_quote_start, 1, start_index
+        )
+        self._apply_multiline_format(
+            text, self.tri_single_quote_start, 1, start_index
+        )
 
-    def _apply_multiline_format(self, text, delimiter_re, state, start_index):
+    def _apply_multiline_format(
+        self, text, delimiter_re, state, start_index
+    ):
         """Helper to apply formatting for multi-line strings."""
         match = delimiter_re.match(text, start_index)
         while match.hasMatch():
             end_match = delimiter_re.match(text, match.capturedEnd())
             if end_match.hasMatch():
                 length = end_match.capturedEnd() - match.capturedStart()
-                self.setFormat(match.capturedStart(), length, self.multiline_string_format)
+                self.setFormat(
+                    match.capturedStart(), length, self.multiline_string_format
+                )
                 match = delimiter_re.match(text, end_match.capturedEnd())
             else:
                 self.setCurrentBlockState(state)
                 length = len(text) - match.capturedStart()
-                self.setFormat(match.capturedStart(), length, self.multiline_string_format)
+                self.setFormat(
+                    match.capturedStart(), length, self.multiline_string_format
+                )
                 return -1
         return match.capturedEnd()
 
     def rehighlight_document(self):
-        """Forces a re-highlight of the entire document, usually after a theme change."""
+        """Forces a re-highlight of the entire document."""
         log.info("Re-highlighting entire document for syntax.")
         self.initialize_formats_and_rules()
         super().rehighlight()

@@ -1,78 +1,83 @@
 # PuffinPyEditor/core_debug_tools/live_log_viewer/plugin_main.py
-import os
-import sys
 import subprocess
+import sys
+from typing import TYPE_CHECKING
 from utils.logger import log, LOG_FILE
 from utils.helpers import get_base_path
+import os
+
+if TYPE_CHECKING:
+    from app_core.puffin_api import PuffinPluginAPI
+    from ui.main_window import MainWindow
+
+# This script is intended to be in the project's root for execution.
+# Adjust the path if this file is moved.
+LOG_VIEWER_SCRIPT_PATH = os.path.join(
+    get_base_path(), "utils", "log_viewer.py"
+)
 
 
 class LiveLogViewerPlugin:
-    def __init__(self, main_window):
+    """
+    A simple plugin to launch a standalone log viewer process.
+    """
+
+    def __init__(self, main_window: 'MainWindow'):
         self.main_window = main_window
-        self.puffin_api = main_window.puffin_api
-        self.debug_api = getattr(self.main_window, 'debug_api', None)
+        self.log_viewer_window = None
+        self.log_file = LOG_FILE
+        self.action = None
 
-        if not self.debug_api:
-            log.error("Live Log Viewer requires the Debug Framework, "
-                      "but it was not found.")
-            return
-
-        # Add the action to the menu for manual launching if needed
-        self.puffin_api.add_menu_action(
-            menu_name="debug",
-            text="Launch Live Log Viewer",
-            callback=self.launch_viewer,
-            icon_name="fa5s.file-medical-alt"
+    def add_menu_action(self, puffin_api: 'PuffinPluginAPI'):
+        """Adds the 'Live Log Viewer' action to the Tools menu."""
+        self.action = puffin_api.add_menu_action(
+            menu_name="tools",
+            text="Live Log Viewer",
+            callback=self.launch_log_viewer,
+            shortcut="Ctrl+Shift+L",
+            icon_name="fa5s.bug"
         )
-        log.info("Live Log Viewer plugin initialized and action added to Debug menu.")
+        self.action.setToolTip(
+            "Open a real-time viewer for the application log.")
+        log.info("Live Log Viewer action added to Tools menu.")
 
     def launch_on_startup(self):
-        """A safe method to be called after the main window is up and running."""
-        log.info("Log viewer startup launch triggered.")
-        self.launch_viewer()
+        """Public method to launch the viewer, intended for debug mode."""
+        log.info("Launching log viewer on startup due to debug mode.")
+        self.launch_log_viewer()
 
-    def _find_viewer_executable(self) -> str:
-        """Determines the path to the log_viewer executable or script."""
-        base_dir = get_base_path()  # Use the robust helper
-        if getattr(sys, 'frozen', False):
-            # In a bundled app, look for the compiled executable.
-            return os.path.join(base_dir, "log_viewer.exe")
-        else:
-            # In development, find the script in the utils directory
-            return os.path.join(base_dir, "utils", "log_viewer.py")
-
-    def launch_viewer(self):
-        """Finds and launches the log_viewer as a separate process."""
-        viewer_path = self._find_viewer_executable()
-
+    def launch_log_viewer(self):
+        """
+        Launches the log_viewer.py script in a new process, passing the
+        current Python interpreter and the log file path.
+        """
         try:
-            if not os.path.exists(viewer_path):
-                msg = (f"Could not find log_viewer at the expected path:\n'{viewer_path}'\n\n"
-                       "If running from source, ensure `utils/log_viewer.py` exists.\n"
-                       "If running a built version, ensure `log_viewer.exe` is in the "
-                       "same directory as the main application.")
-                self.puffin_api.show_message("critical", "Viewer Not Found", msg)
-                return
+            # We must use sys.executable to ensure the new process runs with
+            # the same Python environment (and PyQt6 version) as the main app.
+            python_executable = sys.executable
+            command = [python_executable, LOG_VIEWER_SCRIPT_PATH,
+                       self.log_file]
 
-            command = []
-            if getattr(sys, 'frozen', False):
-                # Just run the executable directly in a bundled app.
-                command = [viewer_path, LOG_FILE]
-            else:
-                # Run with the same Python interpreter in development.
-                command = [sys.executable, viewer_path, LOG_FILE]
+            log.info(f"Executing command: {' '.join(command)}")
 
-            # Launch the viewer as a fully independent process.
+            # Use Popen to launch it as a completely independent process.
+            # This ensures it survives if the main app crashes.
             subprocess.Popen(command)
-            log.info(f"Launched Live Log Viewer for file: {LOG_FILE}")
 
         except Exception as e:
             log.error(f"Failed to launch log viewer: {e}", exc_info=True)
-            self.puffin_api.show_message(
-                "critical", "Launch Failed", "An unexpected error occurred while trying "
-                                             f"to launch the log viewer: {e}")
+
+    def shutdown(self):
+        """Called when the plugin is unloaded."""
+        # The log viewer is a separate process, so there's nothing to clean up
+        # in the main application's memory here. The QAction will be destroyed
+        # with the menu.
+        log.info("Live Log Viewer plugin is shutting down.")
 
 
-def initialize(main_window):
-    """Entry point for the live log viewer plugin."""
-    return LiveLogViewerPlugin(main_window)
+def initialize(puffin_api: 'PuffinPluginAPI'):
+    """Initializes the plugin."""
+    main_window = puffin_api.get_main_window()
+    plugin_instance = LiveLogViewerPlugin(main_window)
+    plugin_instance.add_menu_action(puffin_api)
+    return plugin_instance

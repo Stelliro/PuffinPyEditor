@@ -20,15 +20,17 @@ class GitWorker(QObject):
     git_config_ready = pyqtSignal(str, str)
 
     def _get_author(self, repo: Repo) -> Optional[git.Actor]:
-        """Reads git config and returns a git.Actor. Emits error if config is missing."""
+        """Reads git config and returns a git.Actor. Emits error if missing."""
         try:
             with repo.config_reader() as cr:
                 name = cr.get_value('user', 'name')
                 email = cr.get_value('user', 'email')
             return git.Actor(name, email)
         except (configparser.NoSectionError, configparser.NoOptionError):
-            self.error_occurred.emit("Git user config is missing. Please set it in "
-                                     "Preferences > Source Control.")
+            self.error_occurred.emit(
+                "Git user config is missing. Please set it in "
+                "Preferences > Source Control."
+            )
             return None
 
     def get_git_config(self):
@@ -60,7 +62,9 @@ class GitWorker(QObject):
         try:
             git.Git().config('--global', 'init.defaultBranch', 'main')
             log.info("Set global init.defaultBranch to 'main'.")
-            self.operation_success.emit("Default branch for new repos is now 'main'.", {})
+            self.operation_success.emit(
+                "Default branch for new repos is now 'main'.", {}
+            )
         except GitCommandError as e:
             self.error_occurred.emit(f"Could not set default branch: {e}")
 
@@ -70,12 +74,16 @@ class GitWorker(QObject):
             try:
                 repo = Repo(path, search_parent_directories=True)
                 if repo.bare:
-                    summaries[path] = {'branch': '(bare repo)', 'commit': 'N/A'}
+                    summaries[path] = {'branch': '(bare repo)',
+                                       'commit': 'N/A'}
                 elif not repo.head.is_valid():
-                    summaries[path] = {'branch': '(no commits)', 'commit': 'N/A'}
+                    summaries[path] = {'branch': '(no commits)',
+                                       'commit': 'N/A'}
                 else:
-                    summaries[path] = {'branch': repo.active_branch.name,
-                                       'commit': repo.head.commit.hexsha[:7]}
+                    summaries[path] = {
+                        'branch': repo.active_branch.name,
+                        'commit': repo.head.commit.hexsha[:7]
+                    }
             except InvalidGitRepositoryError:
                 pass
             except Exception as e:
@@ -91,8 +99,11 @@ class GitWorker(QObject):
             untracked = repo.untracked_files
             self.status_ready.emit(staged, unstaged + untracked, repo_path)
         except (InvalidGitRepositoryError, ValueError) as e:
-            self.error_occurred.emit(f"Git Status for "
-                                     f"'{os.path.basename(repo_path)}' failed: {e}")
+            err_msg = (
+                f"Git Status for '{os.path.basename(repo_path)}' "
+                f"failed: {e}"
+            )
+            self.error_occurred.emit(err_msg)
 
     def commit_files(self, repo_path: str, message: str):
         try:
@@ -104,10 +115,14 @@ class GitWorker(QObject):
             repo.git.add(A=True)
             if repo.is_dirty(untracked_files=True):
                 repo.index.commit(message, author=author, committer=author)
-                self.operation_success.emit("Changes committed", {'repo_path': repo_path})
+                self.operation_success.emit(
+                    "Changes committed", {'repo_path': repo_path}
+                )
             else:
-                self.operation_success.emit("No new changes to commit.",
-                                            {'repo_path': repo_path, 'no_changes': True})
+                self.operation_success.emit(
+                    "No new changes to commit.",
+                    {'repo_path': repo_path, 'no_changes': True}
+                )
         except GitCommandError as e:
             self.error_occurred.emit(f"Git Commit failed: {e}")
 
@@ -118,15 +133,23 @@ class GitWorker(QObject):
             if tag_name:
                 log.info(f"Pushing tag '{tag_name}' to remote '{origin.url}'...")
                 origin.push(tag_name)
-                self.operation_success.emit(f"Tag '{tag_name}' pushed successfully", {})
+                self.operation_success.emit(
+                    f"Tag '{tag_name}' pushed successfully", {}
+                )
             else:
                 active_branch = repo.active_branch.name
-                log.info(f"Pushing branch '{active_branch}' to remote '{origin.url}'...")
+                log.info(
+                    f"Pushing branch '{active_branch}' to remote "
+                    f"'{origin.url}'..."
+                )
                 origin.push(refspec=f'{active_branch}:{active_branch}')
                 self.operation_success.emit("Push successful", {})
         except GitCommandError as e:
             err_str = str(e).lower()
-            msg = "Authentication failed." if "authentication failed" in err_str else f"Git Push failed: {e}"
+            if "authentication failed" in err_str:
+                msg = "Authentication failed."
+            else:
+                msg = f"Git Push failed: {e}"
             self.error_occurred.emit(msg)
 
     def pull(self, repo_path: str):
@@ -142,18 +165,26 @@ class GitWorker(QObject):
 
     def clone_repo(self, url: str, path: str, branch: Optional[str] = None):
         try:
-            target_dir = os.path.join(path, os.path.basename(url).replace('.git', ''))
+            target_dir = os.path.join(
+                path, os.path.basename(url).replace('.git', '')
+            )
             kwargs = {'branch': branch} if branch else {}
-            log_msg = f"Cloning '{url}' (branch: {branch or 'default'}) into '{target_dir}'"
+            log_msg = (
+                f"Cloning '{url}' (branch: {branch or 'default'}) "
+                f"into '{target_dir}'"
+            )
             log.info(log_msg)
             Repo.clone_from(url, target_dir, **kwargs)
-            self.operation_success.emit("Clone successful", {"path": target_dir})
+            self.operation_success.emit(
+                "Clone successful", {"path": target_dir}
+            )
         except GitCommandError as e:
             err_str = str(e).lower()
             if "not found in upstream origin" in err_str:
                 msg = f"Branch '{branch}' not found in the remote repository."
             elif "authentication failed" in err_str:
-                msg = "Authentication failed. Repository may be private or URL is incorrect."
+                msg = ("Authentication failed. Repository may be private or "
+                       "URL is incorrect.")
             else:
                 msg = f"Clone failed: {e}"
             self.error_occurred.emit(msg)
@@ -166,13 +197,17 @@ class GitWorker(QObject):
                 return
 
             if not repo.head.is_valid():
-                log.info("No commits found. Creating initial commit for release.")
+                log.info("No commits found. Creating initial commit.")
                 if repo.is_dirty(untracked_files=True):
                     repo.git.add(A=True)
-                    repo.index.commit("Initial commit for release",
-                                      author=author, committer=author)
+                    repo.index.commit(
+                        "Initial commit for release",
+                        author=author, committer=author
+                    )
                 else:
-                    self.error_occurred.emit("Cannot tag an empty project with no files.")
+                    self.error_occurred.emit(
+                        "Cannot tag an empty project with no files."
+                    )
                     return
 
             if tag in repo.tags:
@@ -197,7 +232,9 @@ class GitWorker(QObject):
             repo.remotes.origin.push(refspec=f":{tag}")
             self.operation_success.emit(f"Remote tag '{tag}' deleted.", {})
         except GitCommandError as e:
-            self.error_occurred.emit(f"Failed to delete remote tag '{tag}': {e}")
+            self.error_occurred.emit(
+                f"Failed to delete remote tag '{tag}': {e}"
+            )
 
     def publish_repo(self, path: str, url: str):
         try:
@@ -206,15 +243,20 @@ class GitWorker(QObject):
             if not author:
                 return
             repo.git.branch('-M', 'main')
-            if repo.is_dirty(untracked_files=True) and not repo.head.is_valid():
+            if (repo.is_dirty(untracked_files=True) and
+                    not repo.head.is_valid()):
                 repo.git.add(A=True)
-                repo.index.commit("Initial commit", author=author, committer=author)
+                repo.index.commit(
+                    "Initial commit", author=author, committer=author
+                )
             if 'origin' in repo.remotes:
                 repo.remotes.origin.set_url(url)
             else:
                 repo.create_remote('origin', url)
             repo.remotes.origin.push(refspec='main:main', set_upstream=True)
-            self.operation_success.emit(f"Successfully published to {url}", {'repo_path': path})
+            self.operation_success.emit(
+                f"Successfully published to {url}", {'repo_path': path}
+            )
         except GitCommandError as e:
             log.error(f"Publish failed: {e}", exc_info=True)
             self.error_occurred.emit(f"Publish failed: {e}")
@@ -228,18 +270,26 @@ class GitWorker(QObject):
                 repo.create_remote('origin', remote_url)
             repo.remotes.origin.fetch()
             remote_head = repo.remote().refs.HEAD
-            branch_name = remote_head.reference.name.split('/')[-1] if remote_head.is_valid() else 'main'
+            if remote_head.is_valid():
+                branch_name = remote_head.reference.name.split('/')[-1]
+            else:
+                branch_name = 'main'
             repo.git.branch('-M', branch_name)
             if remote_head.is_valid():
                 repo.git.reset('--soft', f'origin/{branch_name}')
-            if repo.is_dirty(untracked_files=True) and not repo.head.is_valid():
+            if (repo.is_dirty(untracked_files=True) and
+                    not repo.head.is_valid()):
                 author = self._get_author(repo)
                 if not author:
                     return
                 repo.git.add(A=True)
-                repo.index.commit("Initial commit after linking to remote",
-                                  author=author, committer=author)
-            self.operation_success.emit(f"Successfully linked to {remote_url}", {})
+                repo.index.commit(
+                    "Initial commit after linking to remote",
+                    author=author, committer=author
+                )
+            self.operation_success.emit(
+                f"Successfully linked to {remote_url}", {}
+            )
         except GitCommandError as e:
             self.error_occurred.emit(f"Failed to link repository: {e}")
 
@@ -250,8 +300,9 @@ class GitWorker(QObject):
             repo.git.branch('-M', 'master', 'main')
             repo.git.push('--force', '-u', 'origin', 'main')
             repo.git.push('origin', '--delete', 'master')
-            self.operation_success.emit("'main' is now the primary branch.",
-                                        {'repo_path': repo_path})
+            self.operation_success.emit(
+                "'main' is now the primary branch.", {'repo_path': repo_path}
+            )
         except GitCommandError as e:
             self.error_occurred.emit(f"Failed to fix branch mismatch: {e}")
 
@@ -297,8 +348,10 @@ class SourceControlManager(QObject):
         self._request_link_to_remote.connect(self.worker.link_to_remote)
         self._request_get_git_config.connect(self.worker.get_git_config)
         self._request_set_git_config.connect(self.worker.set_git_config)
-        self._request_fix_branches.connect(self.worker.fix_main_master_divergence)
-        self._request_set_default_branch.connect(self.worker.set_default_branch)
+        self._request_fix_branches.connect(
+            self.worker.fix_main_master_divergence)
+        self._request_set_default_branch.connect(
+            self.worker.set_default_branch)
         self.worker.summaries_ready.connect(self.summaries_ready)
         self.worker.status_ready.connect(self.status_updated)
         self.worker.error_occurred.connect(self.git_error)
@@ -373,6 +426,8 @@ class SourceControlManager(QObject):
             log.info("Shutting down SourceControlManager thread.")
             self.thread.quit()
             if not self.thread.wait(3000):
-                log.warning("SourceControlManager thread did not shut down "
-                            "gracefully. Terminating.")
+                log.warning(
+                    "SourceControlManager thread did not shut down "
+                    "gracefully. Terminating."
+                )
                 self.thread.terminate()

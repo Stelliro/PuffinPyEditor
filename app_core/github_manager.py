@@ -48,8 +48,9 @@ class GitHubWorker(QObject):
             headers = {"Accept": "application/json",
                        "User-Agent": self.user_agent}
             payload = {"client_id": CLIENT_ID, "scope": "repo user"}
-            response = requests.post(DEVICE_CODE_URL, data=payload,
-                                     headers=headers, timeout=10)
+            response = requests.post(
+                DEVICE_CODE_URL, data=payload, headers=headers, timeout=10
+            )
             response.raise_for_status()
             data = response.json()
             log.info(f"Received device code: {data.get('user_code')}")
@@ -57,7 +58,8 @@ class GitHubWorker(QObject):
         except requests.RequestException as e:
             log.error(f"Failed to start device flow: {e}", exc_info=True)
             self.auth_failed.emit(
-                "Could not connect to GitHub. Check network and logs.")
+                "Could not connect to GitHub. Check network and logs."
+            )
 
     def poll_for_token(self, device_code: str, interval: int, expires_in: int):
         log.info("Polling for GitHub access token...")
@@ -70,32 +72,41 @@ class GitHubWorker(QObject):
         }
         while time.time() - start_time < expires_in:
             try:
-                response = requests.post(ACCESS_TOKEN_URL, data=payload,
-                                         headers=headers, timeout=interval + 2)
+                response = requests.post(
+                    ACCESS_TOKEN_URL, data=payload,
+                    headers=headers, timeout=interval + 2
+                )
                 data = response.json()
                 if "access_token" in data:
                     self.access_token = data["access_token"]
                     user_info = self._get_authenticated_user_info()
                     user_login = user_info.get("login") if user_info else "user"
-                    settings_manager.set("github_access_token",
-                                         self.access_token, False)
+                    settings_manager.set(
+                        "github_access_token", self.access_token, False
+                    )
                     settings_manager.set("github_user", user_login, False)
-                    settings_manager.set("github_user_info", user_info, False)
+                    settings_manager.set(
+                        "github_user_info", user_info, False
+                    )
                     settings_manager.save()
-                    log.info("Successfully authenticated as GitHub user: "
-                             f"{user_login}")
+                    log.info(
+                        "Successfully authenticated as GitHub user: "
+                        f"{user_login}"
+                    )
                     self.auth_successful.emit(user_login)
                     return
                 elif data.get("error") == "authorization_pending":
                     time.sleep(interval)
                 else:
-                    error_desc = data.get("error_description",
-                                          "Unknown authentication error")
+                    error_desc = data.get(
+                        "error_description", "Unknown authentication error"
+                    )
                     log.error(f"GitHub authentication error: {error_desc}")
                     self.auth_failed.emit(error_desc)
                     return
             except requests.RequestException as e:
-                log.error(f"Exception while polling for token: {e}", exc_info=True)
+                log.error(f"Exception while polling for token: {e}",
+                          exc_info=True)
                 self.auth_failed.emit(f"Network error during auth: {e}")
                 return
         log.warning("Device flow expired before user authorized.")
@@ -105,8 +116,10 @@ class GitHubWorker(QObject):
         if not self.access_token:
             return None
         try:
-            response = requests.get("https://api.github.com/user",
-                                    headers=self._get_headers(), timeout=10)
+            response = requests.get(
+                "https://api.github.com/user",
+                headers=self._get_headers(), timeout=10
+            )
             response.raise_for_status()
             return response.json()
         except requests.RequestException as e:
@@ -121,10 +134,11 @@ class GitHubWorker(QObject):
             all_repos = []
             page = 1
             while True:
-                url = f"https://api.github.com/user/repos?page={page}" \
-                      f"&per_page=100&sort=updated"
-                response = requests.get(url, headers=self._get_headers(),
-                                        timeout=10)
+                url = (f"https://api.github.com/user/repos?page={page}"
+                       f"&per_page=100&sort=updated")
+                response = requests.get(
+                    url, headers=self._get_headers(), timeout=10
+                )
                 response.raise_for_status()
                 data = response.json()
                 if not data:
@@ -141,8 +155,9 @@ class GitHubWorker(QObject):
             return
         try:
             url = f"https://api.github.com/repos/{full_repo_name}/branches"
-            response = requests.get(url, headers=self._get_headers(),
-                                    timeout=10)
+            response = requests.get(
+                url, headers=self._get_headers(), timeout=10
+            )
             response.raise_for_status()
             self.branches_ready.emit(response.json())
         except requests.RequestException as e:
@@ -158,11 +173,13 @@ class GitHubWorker(QObject):
         payload = {"tag_name": tag_name, "name": name, "body": body,
                    "prerelease": prerelease}
         try:
-            response = requests.post(url, headers=self._get_headers(),
-                                     json=payload, timeout=20)
+            response = requests.post(
+                url, headers=self._get_headers(), json=payload, timeout=20
+            )
             response.raise_for_status()
-            self.operation_success.emit("Release created",
-                                        {"release_data": response.json()})
+            self.operation_success.emit(
+                "Release created", {"release_data": response.json()}
+            )
         except requests.exceptions.HTTPError as e:
             msg = f"HTTP {e.response.status_code}: "
             try:
@@ -171,7 +188,9 @@ class GitHubWorker(QObject):
                 if any(err.get('code') == 'already_exists' for err in errs):
                     msg += f"A release for tag '{tag_name}' already exists."
                 else:
-                    msg += error_body.get('message', 'Failed to create release.')
+                    msg += error_body.get(
+                        'message', 'Failed to create release.'
+                    )
             except json.JSONDecodeError:
                 msg += "Failed to create GitHub release."
             self.operation_failed.emit(msg)
@@ -189,11 +208,14 @@ class GitHubWorker(QObject):
         try:
             with open(asset_path, 'rb') as f:
                 data = f.read()
-            response = requests.post(f"{upload_url}?name={asset_name}",
-                                     headers=headers, data=data, timeout=300)
+            response = requests.post(
+                f"{upload_url}?name={asset_name}",
+                headers=headers, data=data, timeout=300
+            )
             response.raise_for_status()
-            self.operation_success.emit("Asset uploaded",
-                                        {"asset_data": response.json()})
+            self.operation_success.emit(
+                "Asset uploaded", {"asset_data": response.json()}
+            )
         except (requests.RequestException, IOError) as e:
             self.operation_failed.emit(f"Failed to upload asset: {e}")
 
@@ -201,13 +223,17 @@ class GitHubWorker(QObject):
         if not self.access_token:
             self.operation_failed.emit("Not logged in to GitHub.")
             return
-        url = f"https://api.github.com/repos/{owner}/{repo}/releases/{release_id}"
+        url = (f"https://api.github.com/repos/{owner}/{repo}/releases/"
+               f"{release_id}")
         log.info(f"ROLLBACK: Attempting to delete release at {url}")
         try:
-            response = requests.delete(url, headers=self._get_headers(), timeout=20)
+            response = requests.delete(
+                url, headers=self._get_headers(), timeout=20
+            )
             response.raise_for_status()
-            self.operation_success.emit("Release deleted",
-                                        {"release_id": release_id})
+            self.operation_success.emit(
+                "Release deleted", {"release_id": release_id}
+            )
         except requests.RequestException as e:
             msg = f"Failed to delete release: {e}"
             if e.response:
@@ -219,16 +245,20 @@ class GitHubWorker(QObject):
             self.operation_failed.emit("Not logged in to GitHub.")
             return
         api_url = "https://api.github.com/user/repos"
-        payload = {"name": name, "description": description, "private": is_private}
+        payload = {"name": name, "description": description,
+                   "private": is_private}
         try:
-            response = requests.post(api_url, headers=self._get_headers(),
-                                     json=payload, timeout=15)
+            response = requests.post(
+                api_url, headers=self._get_headers(), json=payload, timeout=15
+            )
             response.raise_for_status()
-            self.operation_success.emit(f"Repository '{name}' created.",
-                                        response.json())
+            self.operation_success.emit(
+                f"Repository '{name}' created.", response.json()
+            )
         except requests.RequestException as e:
             error_msg = e.response.json().get('message', str(e))
-            self.operation_failed.emit(f"Failed to create repository: {error_msg}")
+            self.operation_failed.emit(
+                f"Failed to create repository: {error_msg}")
 
     def fetch_plugin_index(self, repo_path: str):
         url = f"https://raw.githubusercontent.com/{repo_path}/main/index.json"
@@ -250,15 +280,19 @@ class GitHubWorker(QObject):
         api_url = f"https://api.github.com/repos/{owner}/{repo}"
         payload = {"private": is_private}
         try:
-            response = requests.patch(api_url, headers=self._get_headers(),
-                                      json=payload, timeout=15)
+            response = requests.patch(
+                api_url, headers=self._get_headers(), json=payload, timeout=15
+            )
             response.raise_for_status()
             visibility = "private" if is_private else "public"
             self.operation_success.emit(
-                f"Repository visibility changed to {visibility}.", response.json())
+                f"Repository visibility changed to {visibility}.",
+                response.json()
+            )
         except requests.RequestException as e:
             error_msg = e.response.json().get('message', str(e))
-            self.operation_failed.emit(f"Failed to change visibility: {error_msg}")
+            self.operation_failed.emit(
+                f"Failed to change visibility: {error_msg}")
 
 
 class GitHubManager(QObject):
@@ -303,7 +337,8 @@ class GitHubManager(QObject):
         self._request_create_repo.connect(self.worker.create_repo)
         self._request_create_release.connect(self.worker.create_github_release)
         self._request_upload_asset.connect(self.worker.upload_release_asset)
-        self._request_update_visibility.connect(self.worker.update_repo_visibility)
+        self._request_update_visibility.connect(
+            self.worker.update_repo_visibility)
         self._request_plugin_index.connect(self.worker.fetch_plugin_index)
         self._request_delete_release.connect(self.worker.delete_release)
 
@@ -321,7 +356,8 @@ class GitHubManager(QObject):
 
     def _on_auth_successful(self, username: str):
         self.user_info = settings_manager.get("github_user_info")
-        log.info(f"Authentication successful. Loaded user info for {username}.")
+        log.info(
+            f"Authentication successful. Loaded user info for {username}.")
         self.auth_successful.emit(username)
 
     def get_authenticated_user(self) -> Optional[str]:
@@ -354,10 +390,11 @@ class GitHubManager(QObject):
     def create_repo(self, name: str, description: str, is_private: bool):
         self._request_create_repo.emit(name, description, is_private)
 
-    def create_github_release(self, owner: str, repo: str, tag_name: str, name: str,
-                              body: str, prerelease: bool):
-        self._request_create_release.emit(owner, repo, tag_name, name, body,
-                                          prerelease)
+    def create_github_release(self, owner: str, repo: str, tag_name: str,
+                              name: str, body: str, prerelease: bool):
+        self._request_create_release.emit(
+            owner, repo, tag_name, name, body, prerelease
+        )
 
     def upload_asset(self, upload_url: str, asset_path: str):
         self._request_upload_asset.emit(upload_url, asset_path)
@@ -376,6 +413,8 @@ class GitHubManager(QObject):
             log.info("Shutting down GitHubManager thread.")
             self.thread.quit()
             if not self.thread.wait(3000):
-                log.warning("GitHubManager thread did not shut down "
-                            "gracefully. Terminating.")
+                log.warning(
+                    "GitHubManager thread did not shut down "
+                    "gracefully. Terminating."
+                )
                 self.thread.terminate()

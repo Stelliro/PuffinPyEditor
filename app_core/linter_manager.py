@@ -91,7 +91,9 @@ class LinterRunner(QObject):
             stdout, stderr = process.communicate(timeout=60)
 
             if stderr:
-                log.warning(f"Linter stderr for {project_path}: {stderr.strip()}")
+                log.warning(
+                    f"Linter stderr for {project_path}: {stderr.strip()}"
+                )
 
             results = self._parse_flake8_project_output(stdout, project_path)
             self.project_lint_results_ready.emit(results)
@@ -117,8 +119,9 @@ class LinterRunner(QObject):
                     log.warning(f"Could not parse linter line: {line}")
         return problems
 
-    def _parse_flake8_project_output(self, output: str,
-                                      project_path: str) -> Dict[str, List[Dict]]:
+    def _parse_flake8_project_output(
+        self, output: str, project_path: str
+    ) -> Dict[str, List[Dict]]:
         """Parses flake8 output that uses the custom SAFE_DELIMITER."""
         problems_by_file = {}
         for line in output.strip().splitlines():
@@ -127,8 +130,9 @@ class LinterRunner(QObject):
                 try:
                     raw_path, line_num, col_num, code, desc = parts
                     # Ensure the path is absolute and normalized
-                    abs_path = os.path.normpath(os.path.join(project_path,
-                                                             raw_path))
+                    abs_path = os.path.normpath(
+                        os.path.join(project_path, raw_path)
+                    )
                     problem = {
                         "line": int(line_num),
                         "col": int(col_num),
@@ -166,7 +170,8 @@ class LinterManager(QObject):
         self._request_project_lint.connect(self.runner.run_linter_on_project)
         self.runner.lint_results_ready.connect(self.lint_results_ready)
         self.runner.project_lint_results_ready.connect(
-            self.project_lint_results_ready)
+            self.project_lint_results_ready
+        )
         self.runner.error_occurred.connect(self.error_occurred)
 
         self.thread.start()

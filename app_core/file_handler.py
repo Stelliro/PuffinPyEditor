@@ -6,7 +6,8 @@ import subprocess
 import re
 from typing import Optional, Tuple, Any, Dict
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtGui import QGuiApplication, QDesktopServices
+from PyQt6.QtCore import QUrl
 from .settings_manager import settings_manager
 from utils.logger import log
 
@@ -16,6 +17,9 @@ class FileHandler:
 
     def __init__(self, parent_window: Optional[Any] = None):
         self.parent_window = parent_window
+        self._internal_clipboard: Dict[str, Optional[str]] = {
+            "operation": None, "path": None
+        }
 
     def new_file(self) -> Dict[str, Optional[str]]:
         """
@@ -25,7 +29,11 @@ class FileHandler:
             A dictionary with content, filepath, and a default name.
         """
         log.info("FileHandler: new_file action invoked.")
-        return {"content": "", "filepath": None, "new_file_default_name": "Untitled"}
+        return {
+            "content": "",
+            "filepath": None,
+            "new_file_default_name": "Untitled"
+        }
 
     def open_file_dialog(self) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """
@@ -35,8 +43,9 @@ class FileHandler:
             A tuple containing (filepath, content, error_message).
             On success, error_message is None. On failure, all are None.
         """
-        last_dir = settings_manager.get("last_opened_directory",
-                                        os.path.expanduser("~"))
+        last_dir = settings_manager.get(
+            "last_opened_directory", os.path.expanduser("~")
+        )
         filepath, _ = QFileDialog.getOpenFileName(
             self.parent_window, "Open File", last_dir,
             "Python Files (*.py *.pyw);;All Files (*)"
@@ -44,20 +53,23 @@ class FileHandler:
         if not filepath:
             return None, None, None  # User cancelled
 
-        settings_manager.set("last_opened_directory", os.path.dirname(filepath))
+        settings_manager.set(
+            "last_opened_directory", os.path.dirname(filepath)
+        )
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 content = f.read()
             self._add_to_recent_files(filepath)
             return filepath, content, None
         except (IOError, OSError, UnicodeDecodeError) as e:
-            msg = f"Error opening file '{os.path.basename(filepath)}'." \
-                  f"\n\nReason: {e}"
+            msg = (f"Error opening file '{os.path.basename(filepath)}'."
+                   f"\n\nReason: {e}")
             log.error(msg, exc_info=True)
             return None, None, msg
 
-    def save_file_content(self, filepath: Optional[str], content: str,
-                          save_as: bool = False) -> Optional[str]:
+    def save_file_content(
+            self, filepath: Optional[str], content: str, save_as: bool = False
+    ) -> Optional[str]:
         """
         Saves content to a file. Prompts for a new path if 'save_as' is True
         or if the initial filepath is invalid.
@@ -72,9 +84,9 @@ class FileHandler:
         """
         dir_exists = filepath and os.path.exists(os.path.dirname(filepath))
         if save_as or not filepath or not dir_exists:
-            last_dir = os.path.dirname(filepath) if dir_exists else \
-                settings_manager.get("last_saved_directory",
-                                     os.path.expanduser("~"))
+            last_dir = (os.path.dirname(filepath) if dir_exists else
+                        settings_manager.get("last_saved_directory",
+                                             os.path.expanduser("~")))
             sugg_name = os.path.basename(filepath) if filepath else "Untitled.py"
 
             path_from_dialog, _ = QFileDialog.getSaveFileName(
@@ -85,8 +97,9 @@ class FileHandler:
             if not path_from_dialog:
                 return None  # User cancelled
             filepath = path_from_dialog
-            settings_manager.set("last_saved_directory",
-                                 os.path.dirname(filepath))
+            settings_manager.set(
+                "last_saved_directory", os.path.dirname(filepath)
+            )
 
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
@@ -130,10 +143,9 @@ class FileHandler:
         if not new_name:
             return False, "Name cannot be empty."
 
-        # Check for illegal characters (common across platforms)
         if re.search(r'[<>:"/\\|?*]', new_name):
-            return False, 'Name contains illegal characters ' \
-                   '(e.g., \\ / : * ? " < > |).'
+            return False, ('Name contains illegal characters '
+                           '(e.g., \\ / : * ? " < > |).')
 
         new_path = os.path.join(os.path.dirname(old_path), new_name)
         if os.path.exists(new_path):
@@ -165,43 +177,114 @@ class FileHandler:
             clipboard = QGuiApplication.clipboard()
             clipboard.setText(os.path.normpath(path))
             log.info(f"Copied path to clipboard: {path}")
-            if self.parent_window:
+            if self.parent_window and hasattr(self.parent_window, "statusBar"):
                 self.parent_window.statusBar().showMessage(
-                    "Path copied to clipboard", 2000)
+                    "Path copied to clipboard", 2000
+                )
         except Exception as e:
             log.error(f"Could not copy path to clipboard: {e}")
 
     def reveal_in_explorer(self, path: str):
         """Opens the system file browser to the location of the given path."""
         try:
+            # If the path is a file, open its parent directory and select it.
+            # If it's a directory, open the directory itself.
+            path_to_show = os.path.normpath(path)
             if sys.platform == 'win32':
-                # Use /select to highlight the file/folder
-                subprocess.run(['explorer', '/select,', os.path.normpath(path)])
+                if os.path.isdir(path_to_show):
+                    subprocess.run(['explorer', path_to_show])
+                else:
+                    subprocess.run(['explorer', '/select,', path_to_show])
             elif sys.platform == 'darwin':  # macOS
-                # Use -R to reveal the item in Finder
-                subprocess.run(['open', '-R', os.path.normpath(path)])
+                if os.path.isdir(path_to_show):
+                    subprocess.run(['open', path_to_show])
+                else:
+                    subprocess.run(['open', '-R', path_to_show])
             else:  # Linux and other UNIX-like systems
-                # Open the parent directory
-                dir_path = os.path.dirname(os.path.normpath(path))
+                dir_path = path_to_show if os.path.isdir(path_to_show) else os.path.dirname(path_to_show)
                 subprocess.run(['xdg-open', dir_path])
         except Exception as e:
             log.error(f"Could not open file browser for path '{path}': {e}")
             QMessageBox.warning(self.parent_window, "Error",
                                 f"Could not open file browser: {e}")
 
+    def open_with_default_app(self, path: str):
+        """Opens a file with the system's default application for its type."""
+        try:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        except Exception as e:
+            log.error(f"Failed to open '{path}' with default app: {e}")
+            QMessageBox.warning(self.parent_window, "Error",
+                                f"Could not open file with default application: {e}")
+
+    def duplicate_item(self, path: str) -> Tuple[bool, Optional[str]]:
+        """Creates a copy of a file or folder in the same directory."""
+        dir_name = os.path.dirname(path)
+        base_name, ext = os.path.splitext(os.path.basename(path))
+        counter = 1
+        new_path = os.path.join(dir_name, f"{base_name}_copy{ext}")
+        while os.path.exists(new_path):
+            counter += 1
+            new_path = os.path.join(dir_name, f"{base_name}_copy_{counter}{ext}")
+        try:
+            if os.path.isfile(path):
+                shutil.copy2(path, new_path)
+            elif os.path.isdir(path):
+                shutil.copytree(path, new_path)
+            log.info(f"Duplicated '{path}' to '{new_path}'")
+            return True, None
+        except (OSError, shutil.Error) as e:
+            log.error(f"Failed to duplicate '{path}': {e}", exc_info=True)
+            return False, f"Failed to duplicate: {e}"
+
+    def cut_item(self, path: str):
+        """Marks an item to be moved on the next paste operation."""
+        self._internal_clipboard = {"operation": "cut", "path": path}
+
+    def copy_item(self, path: str):
+        """Marks an item to be copied on the next paste operation."""
+        self._internal_clipboard = {"operation": "copy", "path": path}
+
+    def paste_item(self, dest_dir: str) -> Tuple[bool, Optional[str]]:
+        """Pastes a previously cut or copied item into the destination."""
+        op = self._internal_clipboard.get("operation")
+        src_path = self._internal_clipboard.get("path")
+        if not op or not src_path or not os.path.exists(src_path):
+            return False, "Nothing to paste."
+        if not os.path.isdir(dest_dir):
+            return False, "Paste destination must be a folder."
+
+        dest_path = os.path.join(dest_dir, os.path.basename(src_path))
+        if os.path.exists(dest_path):
+            return False, f"'{os.path.basename(dest_path)}' already exists in the destination."
+
+        try:
+            if op == "cut":
+                shutil.move(src_path, dest_path)
+                log.info(f"Moved '{src_path}' to '{dest_path}'")
+                self._internal_clipboard = {"operation": None, "path": None}
+            elif op == "copy":
+                if os.path.isfile(src_path):
+                    shutil.copy2(src_path, dest_path)
+                else:
+                    shutil.copytree(src_path, dest_path)
+                log.info(f"Copied '{src_path}' to '{dest_path}'")
+            return True, None
+        except (OSError, shutil.Error) as e:
+            log.error(f"Paste operation failed: {e}", exc_info=True)
+            return False, f"Paste operation failed: {e}"
+
+    def get_clipboard_status(self) -> Optional[str]:
+        return self._internal_clipboard.get("operation")
+
     def _add_to_recent_files(self, filepath: str):
         """Adds a file path to the top of the recent files list."""
         if not filepath:
             return
         recents = settings_manager.get("recent_files", [])
-        # Remove if already exists to move it to the top
-        if filepath in recents:
-            recents.remove(filepath)
+        if filepath in recents: recents.remove(filepath)
         recents.insert(0, filepath)
         max_files = settings_manager.get("max_recent_files", 10)
         settings_manager.set("recent_files", recents[:max_files])
-
-        # Notify main window to update its menu
-        if self.parent_window and \
-                hasattr(self.parent_window, '_update_recent_files_menu'):
+        if self.parent_window and hasattr(self.parent_window, '_update_recent_files_menu'):
             self.parent_window._update_recent_files_menu()

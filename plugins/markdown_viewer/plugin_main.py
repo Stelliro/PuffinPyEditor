@@ -28,19 +28,22 @@ class MarkdownPlugin:
         # Check if this file is already open in a viewer
         for i in range(self.main_window.tab_widget.count()):
             widget = self.main_window.tab_widget.widget(i)
-            if isinstance(widget, MarkdownEditorWidget) and widget.filepath == filepath:
+            if (isinstance(widget, MarkdownEditorWidget) and
+                    widget.filepath == filepath):
                 self.main_window.tab_widget.setCurrentIndex(i)
                 return
 
         # If a placeholder "Welcome" tab exists, remove it
         if self.main_window.tab_widget.count() == 1:
             current_widget = self.main_window.tab_widget.widget(0)
-            if hasattr(current_widget, 'objectName') and current_widget.objectName() == "PlaceholderLabel":
+            is_placeholder = (hasattr(current_widget, 'objectName') and
+                              current_widget.objectName() == "PlaceholderLabel")
+            if is_placeholder:
                 self.main_window.tab_widget.removeTab(0)
 
         editor = MarkdownEditorWidget(self.main_window)
         editor.load_file(filepath)
-        # Connect the editor's content changed signal to the main window's handler
+        # Connect editor's signal to the main window's handler
         editor.content_changed.connect(self.main_window._on_content_changed)
 
         tab_name = os.path.basename(filepath)
@@ -59,5 +62,7 @@ def initialize(main_window):
         log.info("Markdown Editor Plugin initialized successfully.")
         return plugin_instance
     except Exception as e:
-        log.error(f"Failed to initialize Markdown Editor Plugin: {e}", exc_info=True)
+        log.error(
+            f"Failed to initialize Markdown Editor Plugin: {e}", exc_info=True
+        )
         return None

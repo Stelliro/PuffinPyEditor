@@ -1,8 +1,8 @@
 # PuffinPyEditor/plugins/github_tools/select_repo_dialog.py
 from typing import Optional, List, Dict, Any
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QListWidget, QListWidgetItem,
-                             QDialogButtonBox, QMessageBox, QLineEdit, QHBoxLayout,
-                             QLabel, QWidget)
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QListWidget,
+                             QListWidgetItem, QDialogButtonBox, QMessageBox,
+                             QLineEdit, QHBoxLayout, QLabel, QWidget)
 from PyQt6.QtCore import Qt
 from app_core.github_manager import GitHubManager
 
@@ -44,8 +44,8 @@ class SelectRepoDialog(QDialog):
             QDialogButtonBox.StandardButton.Cancel
         )
         self.main_layout.addWidget(self.button_box)
-        self.button_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(
-            False)
+        ok_button = self.button_box.button(QDialogButtonBox.StandardButton.Ok)
+        ok_button.setEnabled(False)
 
     def _connect_signals(self):
         self.github_manager.repos_ready.connect(self._handle_repos_loaded)
@@ -68,8 +68,9 @@ class SelectRepoDialog(QDialog):
         self.all_repos = sorted(repos, key=lambda r: r['full_name'].lower())
         self._populate_repo_list()
         if self.repo_list_widget.count() > 0:
-            self.button_box.button(
-                QDialogButtonBox.StandardButton.Ok).setEnabled(True)
+            ok_button = self.button_box.button(
+                QDialogButtonBox.StandardButton.Ok)
+            ok_button.setEnabled(True)
             self.repo_list_widget.setCurrentRow(0)
 
     def _populate_repo_list(self):

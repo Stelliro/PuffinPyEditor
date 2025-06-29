@@ -1,1 +1,8 @@
-{ "id": "find_replace", "name": "Find/Replace", "author": "PuffinPy Team", "version": "1.0.0", "description": "Adds a Find/Replace dialog (Ctrl+F).", "entry_point": "plugin_main.py" }
+{
+    "id": "find_replace",
+    "name": "Find/Replace",
+    "author": "PuffinPy Team",
+    "version": "1.1.1",
+    "description": "Adds a Find/Replace dialog (Ctrl+F).",
+    "entry_point": "plugin_main.py"
+}

@@ -52,6 +52,7 @@ def suggest_next_version() -> str:
     except version.InvalidVersion:
         return "v1.0.0"
 
+
 def write_new_version(new_version_string: str) -> bool:
     """
     Writes a new version string to the VERSION.txt file after validation.

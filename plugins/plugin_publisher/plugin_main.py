@@ -22,8 +22,11 @@ class PluginPublisherPlugin:
         self.update_action_state()
 
         # Connect to the github manager's auth signal to update action state
-        self.api.get_manager("github").auth_successful.connect(lambda user: self.update_action_state())
-        self.api.get_manager("github").auth_failed.connect(lambda err: self.update_action_state())
+        github_manager = self.api.get_manager("github")
+        github_manager.auth_successful.connect(
+            lambda user: self.update_action_state())
+        github_manager.auth_failed.connect(
+            lambda err: self.update_action_state())
 
     def show_publish_dialog(self):
         """
@@ -55,10 +58,10 @@ class PluginPublisherPlugin:
         if github_manager:
             is_logged_in = bool(github_manager.get_authenticated_user())
             self.publish_action.setEnabled(is_logged_in)
-            self.publish_action.setToolTip(
-                "Upload an installed plugin to your distribution repository." if is_logged_in
-                else "Please log in to GitHub in Preferences to use this feature."
-            )
+            tooltip = ("Upload an installed plugin to your distribution repo."
+                       if is_logged_in else
+                       "Log in to GitHub in Preferences to use this feature.")
+            self.publish_action.setToolTip(tooltip)
 
 
 def initialize(main_window):

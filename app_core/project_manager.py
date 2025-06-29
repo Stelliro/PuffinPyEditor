@@ -15,7 +15,10 @@ class ProjectManager:
         self._open_projects: List[str] = []
         self._active_project_path: Optional[str] = None
         self._load_session()
-        log.info(f"ProjectManager initialized with {len(self._open_projects)} projects.")
+        log.info(
+            f"ProjectManager initialized with {len(self._open_projects)} "
+            "projects."
+        )
 
     def _load_session(self):
         """Loads the list of open projects from the settings."""
@@ -23,20 +26,28 @@ class ProjectManager:
         active_project = settings_manager.get("active_project_path")
 
         # Ensure all stored project paths are valid directories
-        self._open_projects = [os.path.normpath(p) for p in open_projects if os.path.isdir(p)]
+        self._open_projects = [
+            os.path.normpath(p) for p in open_projects if os.path.isdir(p)
+        ]
 
-        if active_project and os.path.normpath(active_project) in self._open_projects:
+        if (active_project and
+                os.path.normpath(active_project) in self._open_projects):
             self._active_project_path = os.path.normpath(active_project)
         elif self._open_projects:
             self._active_project_path = self._open_projects[0]
         else:
             self._active_project_path = None
-        log.info(f"Loaded project session. Active project: {self._active_project_path}")
+        log.info(
+            "Loaded project session. Active project: "
+            f"{self._active_project_path}"
+        )
 
     def save_session(self):
         """Saves the current list of open projects to the settings."""
         settings_manager.set("open_projects", self._open_projects, False)
-        settings_manager.set("active_project_path", self._active_project_path, False)
+        settings_manager.set(
+            "active_project_path", self._active_project_path, False
+        )
         log.info("Project session saved.")
 
     def open_project(self, path: str) -> bool:
@@ -95,14 +106,17 @@ class ProjectManager:
             return False
 
         project_root = self.get_active_project_path()
-        ignore_dirs = {'__pycache__', '.git', 'venv', '.venv', 'dist', 'build', 'logs'}
+        ignore_dirs = {
+            '__pycache__', '.git', 'venv', '.venv', 'dist', 'build', 'logs'
+        }
         # Explicitly ignore the user settings file for security
         ignore_files = {'.gitignore', 'puffin_editor_settings.json'}
 
         try:
-            with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            with zipfile.ZipFile(
+                    output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for root, dirs, files in os.walk(project_root):
-                    # Modify dirs in-place to prevent walking into ignored directories
+                    # Modify dirs in-place to prevent walking into ignored dirs
                     dirs[:] = [d for d in dirs if d not in ignore_dirs]
                     for file in files:
                         if file in ignore_files:
@@ -110,13 +124,17 @@ class ProjectManager:
                         file_path = os.path.join(root, file)
                         arcname = os.path.relpath(file_path, project_root)
                         zipf.write(file_path, arcname)
-            log.info(f"Successfully created project archive at {output_zip_path}")
+            log.info(
+                f"Successfully created project archive at {output_zip_path}"
+            )
             return True
         except (IOError, OSError, zipfile.BadZipFile) as e:
             log.error(f"Failed to create project zip: {e}", exc_info=True)
             return False
 
-    def _generate_file_tree_from_list(self, project_root: str, file_list: List[str]) -> List[str]:
+    def _generate_file_tree_from_list(
+        self, project_root: str, file_list: List[str]
+    ) -> List[str]:
         """Generates a text-based file tree from a specific list of files."""
         tree = {}
         for file_path in file_list:
@@ -130,8 +148,10 @@ class ProjectManager:
 
         def build_tree_lines(d: dict, prefix: str = "") -> List[str]:
             lines = []
-            # Sort entries so that directories (which have children) come first
-            entries = sorted(d.keys(), key=lambda k: (not bool(d[k]), k.lower()))
+            # Sort entries so directories (which have children) come first
+            entries = sorted(
+                d.keys(), key=lambda k: (not bool(d[k]), k.lower())
+            )
             for i, name in enumerate(entries):
                 is_last = (i == len(entries) - 1)
                 connector = "└── " if is_last else "├── "
@@ -153,7 +173,7 @@ class ProjectManager:
         all_problems: Optional[Dict[str, List[Dict]]] = None
     ) -> Tuple[bool, str]:
         """
-        Exports the selected project files into a single Markdown file for AI analysis.
+        Exports selected project files into a single Markdown file for AI.
         """
         if not self.is_project_open():
             return False, "No project is open."
@@ -168,25 +188,32 @@ class ProjectManager:
             instructions or "No specific instructions were provided.", "```",
             "\n## 📜 AI Guidelines & Rules", "```text",
         ]
-        guideline_text = "\n".join([f"- {g}" for g in guidelines]) if guidelines else "No specific guidelines were provided."
+        guideline_text = "\n".join(
+            [f"- {g}" for g in guidelines]
+        ) if guidelines else "No specific guidelines were provided."
         output_lines.append(guideline_text)
         output_lines.extend(["```", "---"])
 
         output_lines.append("\n## ✨ Golden Rules\n```text")
-        golden_rules_text = "\n".join([f"{i+1}. {g}" for i, g in enumerate(golden_rules)]) if golden_rules else "No specific golden rules were provided."
+        golden_rules_text = "\n".join(
+            [f"{i+1}. {g}" for i, g in enumerate(golden_rules)]
+        ) if golden_rules else "No specific golden rules were provided."
         output_lines.append(golden_rules_text)
         output_lines.extend(["```", "---"])
 
         output_lines.append("\n## 🗂️ File Tree of Included Files:\n```")
         output_lines.append(f"/{project_name}")
-        output_lines.extend(self._generate_file_tree_from_list(project_root, selected_files))
+        output_lines.extend(
+            self._generate_file_tree_from_list(project_root, selected_files)
+        )
         output_lines.append("```\n---")
         output_lines.append("\n## 📄 File Contents:\n")
 
         file_count = 0
         for filepath in sorted(selected_files):
             norm_filepath = os.path.normpath(filepath)
-            relative_path = Path(filepath).relative_to(project_root).as_posix()
+            relative_path = Path(
+                filepath).relative_to(project_root).as_posix()
             language = Path(filepath).suffix.lstrip('.') or 'text'
             if language == 'py':
                 language = 'python'
@@ -197,8 +224,10 @@ class ProjectManager:
                 output_lines.append("#### Linter Issues Found:")
                 output_lines.append("```")
                 for problem in all_problems[norm_filepath]:
-                    output_lines.append(f"- Line {problem['line']}, Col {problem['col']} "
-                                        f"({problem['code']}): {problem['description']}")
+                    output_lines.append(
+                        f"- Line {problem['line']}, Col {problem['col']} "
+                        f"({problem['code']}): {problem['description']}"
+                    )
                 output_lines.append("```\n")
 
             output_lines.append(f"```{language}")
@@ -207,15 +236,20 @@ class ProjectManager:
                     output_lines.append(f.read())
                 file_count += 1
             except (IOError, UnicodeDecodeError) as e:
-                log.warning(f"Could not read file during AI export: {filepath}. Error: {e}")
+                log.warning(
+                    "Could not read file during AI export: "
+                    f"{filepath}. Error: {e}"
+                )
                 output_lines.append(f"[Error reading file: {e}]")
             output_lines.append("```\n---")
 
         try:
             with open(output_filepath, 'w', encoding='utf-8') as f:
                 f.write("\n".join(output_lines))
-            return True, f"Project exported to {Path(output_filepath).name}. " \
-                   f"Included {file_count} files."
+            return True, (
+                f"Project exported to {Path(output_filepath).name}. "
+                f"Included {file_count} files."
+            )
         except IOError as e:
             log.error(f"Failed to write AI export file: {e}", exc_info=True)
             return False, f"Failed to write export file: {e}"

@@ -2,10 +2,11 @@
 import re
 import datetime
 import copy
-from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QWidget,
-                             QLabel, QLineEdit, QPushButton, QDialogButtonBox,
-                             QScrollArea, QMessageBox, QColorDialog, QListWidget,
-                             QListWidgetItem, QSplitter, QFrame, QGroupBox)
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
+                             QWidget, QLabel, QLineEdit, QPushButton,
+                             QDialogButtonBox, QScrollArea, QMessageBox,
+                             QColorDialog, QListWidget, QListWidgetItem,
+                             QSplitter, QFrame, QGroupBox)
 from PyQt6.QtGui import QColor, QFont, QPixmap, QIcon
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from utils.logger import log
@@ -60,21 +61,26 @@ class ThemeEditorDialog(QDialog):
         self.setModal(True)
         self.COLOR_GROUPS = {
             "Window & General": ["window.background", "sidebar.background", "accent"],
-            "Editor": ["editor.background", "editor.foreground", "editor.lineHighlightBackground"],
-            "Editor Gutter": ["editorGutter.background", "editorGutter.foreground"],
-            "Editor Matching": ["editor.matchingBracketBackground", "editor.matchingBracketForeground"],
-            "Controls": ["button.background", "button.foreground", "input.background",
-                         "input.foreground", "input.border"],
-            "Bars & Menus": ["statusbar.background", "statusbar.foreground", "menu.background",
-                             "menu.foreground"],
+            "Editor": ["editor.background", "editor.foreground",
+                       "editor.lineHighlightBackground"],
+            "Editor Gutter": ["editorGutter.background",
+                              "editorGutter.foreground"],
+            "Editor Matching": ["editor.matchingBracketBackground",
+                                "editor.matchingBracketForeground"],
+            "Controls": ["button.background", "button.foreground",
+                         "input.background", "input.foreground", "input.border"],
+            "Bars & Menus": ["statusbar.background", "statusbar.foreground",
+                             "menu.background", "menu.foreground"],
             "Editor Tabs": ["tab.activeBackground", "tab.inactiveBackground",
                             "tab.activeForeground", "tab.inactiveForeground"],
             "Scrollbar": ["scrollbar.background", "scrollbar.handle",
                           "scrollbar.handleHover", "scrollbar.handlePressed"],
-            "Syntax Highlighting": ["syntax.keyword", "syntax.operator", "syntax.brace",
-                                    "syntax.decorator", "syntax.self", "syntax.className",
-                                    "syntax.functionName", "syntax.comment", "syntax.string",
-                                    "syntax.docstring", "syntax.number"]
+            "Syntax Highlighting": [
+                "syntax.keyword", "syntax.operator", "syntax.brace",
+                "syntax.decorator", "syntax.self", "syntax.className",
+                "syntax.functionName", "syntax.comment", "syntax.string",
+                "syntax.docstring", "syntax.number"
+            ]
         }
         self.current_theme_id = None
         self.is_custom_theme = False
@@ -103,7 +109,9 @@ class ThemeEditorDialog(QDialog):
         layout.addWidget(QLabel("<b>Available Themes:</b>"))
         self.theme_list_widget = QListWidget()
         self.theme_list_widget.setAlternatingRowColors(True)
-        self.theme_list_widget.currentItemChanged.connect(self._on_theme_selection_changed)
+        self.theme_list_widget.currentItemChanged.connect(
+            self._on_theme_selection_changed
+        )
         layout.addWidget(self.theme_list_widget, 1)
         actions_layout = QHBoxLayout()
         self.duplicate_button = QPushButton("Duplicate")
@@ -153,7 +161,8 @@ class ThemeEditorDialog(QDialog):
         self.theme_list_widget.clear()
         all_themes = theme_manager.get_available_themes_for_ui()
         target_row = 0
-        current_selection = select_theme_id or self.current_theme_id or theme_manager.current_theme_id
+        current_selection = (select_theme_id or self.current_theme_id or
+                             theme_manager.current_theme_id)
         for i, (theme_id, name) in enumerate(all_themes.items()):
             item = QListWidgetItem(name)
             item.setData(Qt.ItemDataRole.UserRole, theme_id)
@@ -165,22 +174,29 @@ class ThemeEditorDialog(QDialog):
                 target_row = i
         self.theme_list_widget.setCurrentRow(target_row)
         self.theme_list_widget.blockSignals(False)
-        self._on_theme_selection_changed(self.theme_list_widget.currentItem(), None)
+        self._on_theme_selection_changed(
+            self.theme_list_widget.currentItem(), None
+        )
 
     def _on_theme_selection_changed(self, current, previous):
         if not current:
             self._clear_editor()
             return
+
         if self.unsaved_changes and current is not previous:
-            reply = QMessageBox.question(self, "Unsaved Changes", "Discard changes to the previous theme?",
-                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                         QMessageBox.StandardButton.No)
+            reply = QMessageBox.question(
+                self, "Unsaved Changes",
+                "Discard changes to the previous theme?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
             if reply == QMessageBox.StandardButton.No:
                 self.theme_list_widget.blockSignals(True)
                 if previous:
                     self.theme_list_widget.setCurrentItem(previous)
                 self.theme_list_widget.blockSignals(False)
                 return
+
         new_theme_id = current.data(Qt.ItemDataRole.UserRole)
         if new_theme_id != self.current_theme_id:
             self.current_theme_id = new_theme_id
@@ -204,7 +220,8 @@ class ThemeEditorDialog(QDialog):
         sorted_keys = sorted(all_color_keys)
 
         for group_name, prefixes in self.COLOR_GROUPS.items():
-            group_keys = [k for k in sorted_keys if any(k.startswith(p) for p in prefixes)]
+            group_keys = [k for k in sorted_keys if
+                          any(k.startswith(p) for p in prefixes)]
             if not group_keys:
                 continue
 
@@ -233,7 +250,9 @@ class ThemeEditorDialog(QDialog):
     def _action_duplicate_theme(self):
         if not self.current_theme_id:
             return
-        original_theme = copy.deepcopy(theme_manager.get_theme_data_by_id(self.current_theme_id))
+        original_theme = copy.deepcopy(
+            theme_manager.get_theme_data_by_id(self.current_theme_id)
+        )
         if not original_theme:
             return
 
@@ -255,10 +274,12 @@ class ThemeEditorDialog(QDialog):
             return
         theme_data = theme_manager.get_theme_data_by_id(self.current_theme_id)
         theme_name = theme_data.get('name', self.current_theme_id)
-        reply = QMessageBox.question(self, "Confirm Delete",
-                                     f"Are you sure you want to delete the theme '{theme_name}'?",
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                     QMessageBox.StandardButton.No)
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete the theme '{theme_name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
         if reply == QMessageBox.StandardButton.Yes:
             theme_manager.delete_custom_theme(self.current_theme_id)
             self.custom_themes_changed.emit()
@@ -269,7 +290,9 @@ class ThemeEditorDialog(QDialog):
     def _action_save(self):
         if not self.is_custom_theme or not self.unsaved_changes:
             return
-        theme_data = copy.deepcopy(theme_manager.get_theme_data_by_id(self.current_theme_id))
+        theme_data = copy.deepcopy(
+            theme_manager.get_theme_data_by_id(self.current_theme_id)
+        )
         theme_data['name'] = self.name_edit.text()
         for key, widget in self.color_widgets.items():
             theme_data['colors'][key] = widget.get_color().name()
@@ -280,7 +303,9 @@ class ThemeEditorDialog(QDialog):
         self._update_ui_state()
         if self.current_theme_id == theme_manager.current_theme_id:
             theme_manager.set_theme(self.current_theme_id)
-        QMessageBox.information(self, "Success", f"Theme '{theme_data['name']}' has been updated.")
+        QMessageBox.information(
+            self, "Success", f"Theme '{theme_data['name']}' has been updated."
+        )
 
     def _mark_unsaved_changes(self, *args):
         if self.is_custom_theme:
@@ -322,9 +347,11 @@ class ThemeEditorDialog(QDialog):
 
     def reject(self):
         if self.unsaved_changes:
-            reply = QMessageBox.question(self, "Unsaved Changes", "Discard changes and close?",
-                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                         QMessageBox.StandardButton.No)
+            reply = QMessageBox.question(
+                self, "Unsaved Changes", "Discard changes and close?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
             if reply == QMessageBox.StandardButton.Yes:
                 super().reject()
         else:

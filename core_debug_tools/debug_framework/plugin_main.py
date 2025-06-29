@@ -14,7 +14,8 @@ class DebugFrameworkPlugin:
 
         # Create the 'Debug' menu if it doesn't exist
         if not hasattr(self.main_window, 'debug_menu'):
-            self.main_window.debug_menu = self.main_window.menuBar().addMenu("&Debug")
+            self.main_window.debug_menu = self.main_window.menuBar().addMenu(
+                "&Debug")
 
         # Create the Debug API and attach it to the main window
         self.main_window.debug_api = PuffinDebugAPI(self)
@@ -34,7 +35,7 @@ class DebugFrameworkPlugin:
         if self.debug_window is None or not self.debug_window.isVisible():
             # Pass the PuffinAPI to the debug window so it can pass it to tools
             self.debug_window = DebugWindow(self.puffin_api, self.main_window)
-            # Re-register any tools that might have been registered before window was shown
+            # Re-register any tools that might have been registered
             for name, widget_class in self.main_window.debug_api.registered_tools.items():
                 self.debug_window.add_tool_tab(name, widget_class)
 

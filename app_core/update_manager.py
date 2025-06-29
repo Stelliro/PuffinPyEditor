@@ -17,7 +17,7 @@ class UpdateManager(QObject):
     def check_for_updates(self):
         """
         Fetches the latest release data from GitHub and compares it with the
-        current application version. Emits `update_check_finished` with the result.
+        current application version. Emits `update_check_finished`.
         """
         log.info(f"Checking for updates... Current version: {APP_VERSION}")
 
@@ -29,10 +29,12 @@ class UpdateManager(QObject):
             return
 
         all_repos = settings_manager.get("source_control_repos", [])
-        repo_config = next((r for r in all_repos if r.get("id") == active_repo_id), None)
+        repo_config = next(
+            (r for r in all_repos if r.get("id") == active_repo_id), None
+        )
 
         if not repo_config:
-            msg = f"Active update repository with ID '{active_repo_id}' not found."
+            msg = f"Update repo with ID '{active_repo_id}' not found."
             log.error(f"Update check failed: {msg}")
             self.update_check_finished.emit({"error": msg})
             return
@@ -41,7 +43,7 @@ class UpdateManager(QObject):
         repo = repo_config.get("repo")
 
         if not owner or not repo:
-            msg = f"Active repository '{repo_config.get('name')}' is misconfigured."
+            msg = f"Repo '{repo_config.get('name')}' is misconfigured."
             log.error(f"Update check failed: {msg}")
             self.update_check_finished.emit({"error": msg})
             return
@@ -56,7 +58,8 @@ class UpdateManager(QObject):
 
             latest_version_tag = release_data.get("tag_name", "").lstrip('v')
             if not latest_version_tag:
-                self.update_check_finished.emit({"error": "Latest release has no version tag."})
+                msg = "Latest release has no version tag."
+                self.update_check_finished.emit({"error": msg})
                 return
 
             if version.parse(latest_version_tag) > version.parse(APP_VERSION):
@@ -64,21 +67,27 @@ class UpdateManager(QObject):
                 result: Dict = {
                     "update_available": True,
                     "latest_version": latest_version_tag,
-                    "release_notes": release_data.get("body", "No release notes provided."),
+                    "release_notes": release_data.get(
+                        "body", "No release notes provided."
+                    ),
                     "download_url": None
                 }
                 # Find the first .zip asset, as this is what the updater expects
                 for asset in release_data.get("assets", []):
                     if asset.get("name", "").lower().endswith(".zip"):
-                        result["download_url"] = asset.get("browser_download_url")
+                        result["download_url"] = asset.get(
+                            "browser_download_url")
                         break
 
                 if result["download_url"]:
                     self.update_check_finished.emit(result)
                 else:
-                    log.warning("New version found, but no suitable .zip asset "
-                                "was available for download.")
-                    self.update_check_finished.emit({"update_available": False})
+                    log.warning(
+                        "New version found, but no suitable .zip asset "
+                        "was available for download."
+                    )
+                    self.update_check_finished.emit(
+                        {"update_available": False})
             else:
                 log.info("Application is up to date.")
                 self.update_check_finished.emit({"update_available": False})
@@ -90,8 +99,10 @@ class UpdateManager(QObject):
         except requests.exceptions.RequestException as e:
             msg = f"Network error checking for updates: {e}"
             log.error(msg)
-            self.update_check_finished.emit({"error": "A network error occurred."})
+            self.update_check_finished.emit(
+                {"error": "A network error occurred."})
         except Exception as e:
             msg = f"An unexpected error occurred during update check: {e}"
             log.critical(msg, exc_info=True)
-            self.update_check_finished.emit({"error": "An unexpected error occurred."})
+            self.update_check_finished.emit(
+                {"error": "An unexpected error occurred."})

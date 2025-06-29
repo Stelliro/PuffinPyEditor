@@ -1,6 +1,7 @@
 # PuffinPyEditor/app_core/puffin_api.py
 from typing import Callable, Optional
-from PyQt6.QtWidgets import QDockWidget, QTabWidget, QWidget, QMenu, QMessageBox
+from PyQt6.QtWidgets import (QDockWidget, QTabWidget, QWidget, QMenu,
+                             QMessageBox)
 from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt
 import qtawesome as qta
@@ -8,13 +9,43 @@ from utils.logger import log
 
 
 class PuffinPluginAPI:
-    """A stable API for plugins to interact with the MainWindow."""
+    """
+    A stable API for plugins to interact with the MainWindow.
+    This version includes proxying capabilities for backward compatibility with
+    plugins that expect the main_window object directly.
+    """
 
     def __init__(self, main_window):
         self._main_window = main_window
         self._bottom_dock_widget: Optional[QDockWidget] = None
         self._bottom_tab_widget: Optional[QTabWidget] = None
         log.info("PuffinPluginAPI initialized.")
+
+    @property
+    def puffin_api(self):
+        """
+        Provides backward compatibility for plugins that were written to
+        expect main_window.puffin_api.
+        """
+        return self
+
+    def __getattr__(self, name: str):
+        """
+        Proxy for attributes not found on the API, allowing access to MainWindow
+        attributes for legacy plugins. This provides backward compatibility.
+        """
+        if hasattr(self._main_window, name):
+            log.warning(
+                f"Plugin is accessing 'MainWindow.{name}' directly via the API. "
+                "This is a deprecated behavior. Please update the plugin to "
+                "use a dedicated API method if available."
+            )
+            return getattr(self._main_window, name)
+
+        raise AttributeError(
+            f"'PuffinPluginAPI' object (and its wrapped 'MainWindow') has no "
+            f"attribute '{name}'"
+        )
 
     def get_main_window(self):
         """Returns the main application window instance."""
@@ -52,41 +83,50 @@ class PuffinPluginAPI:
         return None
 
     def get_menu(self, menu_name: str) -> Optional[QMenu]:
-        """Gets a QMenu by name. Does not create new menus."""
+        """Gets a QMenu by name from the main window."""
         return getattr(self._main_window, f"{menu_name}_menu", None)
 
     def add_menu_action(self, menu_name: str, text: str, callback: Callable,
-                        shortcut: Optional[str] = None, icon_name: Optional[str] = None) -> QAction:
-        """Adds an action to a menu, creating the menu in a standard order if it doesn't exist."""
+                        shortcut: Optional[str] = None,
+                        icon_name: Optional[str] = None) -> QAction:
+        """
+        Adds an action to a menu. Creates and inserts the menu in a standard
+        order if it doesn't exist, enhancing modularity.
+        """
         menu = self.get_menu(menu_name)
         if not menu:
+            # If the menu doesn't exist, create it and insert it logically.
             log.info(f"Menu '{menu_name}' not found. Creating it dynamically.")
             menu_bar = self._main_window.menuBar()
 
-            # Define the standard order of menus
-            standard_order = ["file", "edit", "view", "go", "run", "tools", "help"]
-
-            # Find the correct action to insert the new menu before
+            # Define the standard order of menus for logical placement
+            standard_order = [
+                "file", "edit", "view", "go", "run", "tools", "help"
+            ]
             insert_before_action = None
-            current_menu_index = standard_order.index(menu_name) if menu_name in standard_order else -1
-
-            if current_menu_index != -1:
-                # Find the next menu in the standard order that already exists
+            try:
+                # Find where the new menu should go
+                current_menu_index = standard_order.index(menu_name)
+                # Find the next menu in the standard list that already exists
                 for next_menu_name in standard_order[current_menu_index + 1:]:
                     if next_menu := self.get_menu(next_menu_name):
                         insert_before_action = next_menu.menuAction()
                         break
+            except ValueError:
+                # Not a standard menu, will be added at the end
+                pass
 
             new_menu = QMenu(f"&{menu_name.capitalize()}", self._main_window)
 
             if insert_before_action:
                 menu_bar.insertMenu(insert_before_action, new_menu)
             else:
-                # If no subsequent menu is found (e.g., adding a new last menu), just add it
+                # Add to the end if no subsequent standard menu exists
                 menu_bar.addMenu(new_menu)
 
+            # Store the new menu on the main window instance
+            setattr(self._main_window, f"{menu_name}_menu", new_menu)
             menu = new_menu
-            setattr(self._main_window, f"{menu_name}_menu", menu)
             log.info(f"Dynamically created and inserted menu '{menu_name}'.")
 
         icon = qta.icon(icon_name) if icon_name else None
@@ -104,18 +144,22 @@ class PuffinPluginAPI:
         self._main_window.main_toolbar.addAction(action)
         log.info(f"Added action '{action.text()}' to main toolbar.")
 
-    def register_dock_panel(self, panel_widget: QWidget, title: str, area: Qt.DockWidgetArea, icon_name: str = None):
+    def register_dock_panel(self, panel_widget: QWidget, title: str,
+                            area: Qt.DockWidgetArea, icon_name: str = None):
+        """Registers a widget as a dock panel, grouping bottom panels."""
         if area == Qt.DockWidgetArea.BottomDockWidgetArea:
             if self._bottom_tab_widget is None:
                 log.info("Creating shared bottom dock area for plugins.")
-                self._bottom_dock_widget = QDockWidget("Info Panels", self._main_window)
+                self._bottom_dock_widget = QDockWidget("Info Panels",
+                                                       self._main_window)
                 self._bottom_dock_widget.setObjectName("SharedBottomDock")
                 self._bottom_tab_widget = QTabWidget()
                 self._bottom_tab_widget.setDocumentMode(True)
                 self._bottom_dock_widget.setWidget(self._bottom_tab_widget)
                 self._main_window.addDockWidget(area, self._bottom_dock_widget)
                 self._main_window.view_menu.addSeparator()
-                self._main_window.view_menu.addAction(self._bottom_dock_widget.toggleViewAction())
+                action = self._bottom_dock_widget.toggleViewAction()
+                self._main_window.view_menu.addAction(action)
 
             icon = qta.icon(icon_name) if icon_name else None
             self._bottom_tab_widget.addTab(panel_widget, icon, title)
@@ -125,6 +169,7 @@ class PuffinPluginAPI:
             self._main_window.addDockWidget(area, dock)
             self._main_window.view_menu.addSeparator()
             self._main_window.view_menu.addAction(dock.toggleViewAction())
+
         log.info(f"Registered panel '{title}'")
 
     def register_file_opener(self, extension: str, handler_func: Callable):
@@ -134,9 +179,14 @@ class PuffinPluginAPI:
         log.info(f"Registered custom opener for '{extension}' files.")
 
     def show_message(self, level: str, title: str, text: str):
-        level_map = {'info': QMessageBox.Icon.Information, 'warning': QMessageBox.Icon.Warning,
-                     'critical': QMessageBox.Icon.Critical}
-        QMessageBox(level_map.get(level, QMessageBox.Icon.NoIcon), title, text, parent=self._main_window).exec()
+        level_map = {
+            'info': QMessageBox.Icon.Information,
+            'warning': QMessageBox.Icon.Warning,
+            'critical': QMessageBox.Icon.Critical
+        }
+        icon = level_map.get(level, QMessageBox.Icon.NoIcon)
+        msg_box = QMessageBox(icon, title, text, parent=self._main_window)
+        msg_box.exec()
 
     def show_status_message(self, text: str, timeout_ms: int = 3000):
         self._main_window.statusBar().showMessage(text, timeout_ms)

@@ -1,0 +1,8 @@
+{
+    "id": "global_drag_drop_handler",
+    "name": "Global Drag and Drop Handler",
+    "author": "PuffinPy Team",
+    "version": "1.0.0",
+    "description": "Enables dragging and dropping files from the OS onto the application to open them in tabs.",
+    "entry_point": "plugin_main.py"
+}

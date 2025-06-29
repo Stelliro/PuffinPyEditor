@@ -1,9 +1,10 @@
 # /plugins/markdown_viewer/markdown_editor_widget.py
 import qtawesome as qta
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser, QPlainTextEdit,
-                             QSplitter, QMenu, QLineEdit, QToolButton, QFrame)
-from PyQt6.QtGui import (QFont, QTextCursor, QMouseEvent, QPainter, QColor, QKeySequence,
-                         QAction)
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser,
+                             QPlainTextEdit, QSplitter, QMenu, QLineEdit,
+                             QToolButton, QFrame)
+from PyQt6.QtGui import (QFont, QTextCursor, QMouseEvent, QPainter, QColor,
+                         QKeySequence, QAction)
 from PyQt6.QtCore import QTimer, pyqtSignal, Qt, QSize
 from markdown import markdown
 
@@ -27,7 +28,8 @@ class MarkdownFormattingToolbar(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.setWindowFlags(
+            Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self.frame = QFrame(self)
@@ -37,14 +39,20 @@ class MarkdownFormattingToolbar(QWidget):
         self.layout.setContentsMargins(4, 4, 4, 4)
         self.layout.setSpacing(2)
 
-        self._add_tool_button("fa5s.bold", "Bold (Ctrl+B)", self.format_bold_requested)
-        self._add_tool_button("fa5s.italic", "Italic (Ctrl+I)", self.format_italic_requested)
-        self._add_tool_button("fa5s.strikethrough", "Strikethrough", self.format_strikethrough_requested)
-        self._add_tool_button("fa5s.code", "Inline Code", self.format_inline_code_requested)
+        self._add_tool_button("fa5s.bold", "Bold (Ctrl+B)",
+                              self.format_bold_requested)
+        self._add_tool_button("fa5s.italic", "Italic (Ctrl+I)",
+                              self.format_italic_requested)
+        self._add_tool_button("fa5s.strikethrough", "Strikethrough",
+                              self.format_strikethrough_requested)
+        self._add_tool_button("fa5s.code", "Inline Code",
+                              self.format_inline_code_requested)
         self._add_separator()
         self._create_heading_menu()
         self._add_separator()
-        self._add_tool_button("fa5s.file-code", "Insert Code Block", self.code_block_requested)
+        self._add_tool_button(
+            "fa5s.file-code", "Insert Code Block", self.code_block_requested
+        )
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -72,7 +80,8 @@ class MarkdownFormattingToolbar(QWidget):
         heading_menu = QMenu(self)
         for i in range(1, 7):
             action = QAction(f"Heading {i}", self)
-            action.triggered.connect(lambda _, level=i: self.heading_level_requested.emit(level))
+            action.triggered.connect(
+                lambda _, level=i: self.heading_level_requested.emit(level))
             heading_menu.addAction(action)
         heading_button.setMenu(heading_menu)
         self.layout.addWidget(heading_button)
@@ -82,9 +91,18 @@ class MarkdownFormattingToolbar(QWidget):
         menu_bg = colors.get('menu.background', '#3a4145')
         border_color = colors.get('input.border', '#555555')
         self.frame.setStyleSheet(f"""
-            #FormattingToolbarFrame {{ background-color: {menu_bg}; border: 1px solid {border_color}; border-radius: 6px; }}
-            QToolButton {{ background-color: transparent; border: none; padding: 5px; border-radius: 4px; }}
-            QToolButton:hover {{ background-color: {colors.get('accent', '#88c0d0')}; }}
+            #FormattingToolbarFrame {{
+                background-color: {menu_bg};
+                border: 1px solid {border_color};
+                border-radius: 6px;
+            }}
+            QToolButton {{
+                background-color: transparent; border: none; padding: 5px;
+                border-radius: 4px;
+            }}
+            QToolButton:hover {{
+                background-color: {colors.get('accent', '#88c0d0')};
+            }}
             QFrame[frameShape="5"] {{ color: {border_color}; }}
         """)
 
@@ -104,9 +122,11 @@ class LineNumberArea(QWidget):
         super().__init__(editor)
         self.source_editor = editor
 
-    def sizeHint(self): return QSize(self.source_editor.line_number_area_width(), 0)
+    def sizeHint(self):
+        return QSize(self.source_editor.line_number_area_width(), 0)
 
-    def paintEvent(self, event): self.source_editor.line_number_area_paint_event(event)
+    def paintEvent(self, event):
+        self.source_editor.line_number_area_paint_event(event)
 
 
 class InteractiveTextBrowser(QTextBrowser):
@@ -129,11 +149,16 @@ class MarkdownSourceEditor(QPlainTextEdit):
         self.update_line_number_area_width(0)
         self.formatting_toolbar = MarkdownFormattingToolbar(self)
         self.formatting_toolbar.format_bold_requested.connect(self._format_bold)
-        self.formatting_toolbar.format_italic_requested.connect(self._format_italic)
-        self.formatting_toolbar.format_strikethrough_requested.connect(self._format_strikethrough)
-        self.formatting_toolbar.format_inline_code_requested.connect(self._format_inline_code)
-        self.formatting_toolbar.heading_level_requested.connect(self._format_heading)
-        self.formatting_toolbar.code_block_requested.connect(self._insert_code_block)
+        self.formatting_toolbar.format_italic_requested.connect(
+            self._format_italic)
+        self.formatting_toolbar.format_strikethrough_requested.connect(
+            self._format_strikethrough)
+        self.formatting_toolbar.format_inline_code_requested.connect(
+            self._format_inline_code)
+        self.formatting_toolbar.heading_level_requested.connect(
+            self._format_heading)
+        self.formatting_toolbar.code_block_requested.connect(
+            self._insert_code_block)
 
     def line_number_area_width(self):
         digits = len(str(max(1, self.blockCount())))
@@ -146,31 +171,45 @@ class MarkdownSourceEditor(QPlainTextEdit):
         if dy:
             self.line_number_area.scroll(0, dy)
         else:
-            self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
+            self.line_number_area.update(0, rect.y(),
+                                         self.line_number_area.width(),
+                                         rect.height())
         if rect.contains(self.viewport().rect()):
             self.update_line_number_area_width(0)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         cr = self.contentsRect()
-        self.line_number_area.setGeometry(cr.left(), cr.top(), self.line_number_area_width(), cr.height())
+        self.line_number_area.setGeometry(
+            cr.left(), cr.top(), self.line_number_area_width(), cr.height())
 
     def line_number_area_paint_event(self, event):
         painter = QPainter(self.line_number_area)
         colors = theme_manager.current_theme_data.get('colors', {})
-        painter.fillRect(event.rect(), QColor(colors.get('editorGutter.background', '#f0f0f0')))
+        gutter_bg = colors.get('editorGutter.background', '#f0f0f0')
+        painter.fillRect(event.rect(), QColor(gutter_bg))
+
         block = self.firstVisibleBlock()
-        top = self.blockBoundingGeometry(self.firstVisibleBlock()).translated(self.contentOffset()).top()
+        block_geo = self.blockBoundingGeometry(block)
+        top = block_geo.translated(self.contentOffset()).top()
         bottom = top + self.blockBoundingRect(block).height()
-        current_line = self.textCursor().blockNumber()
+
+        current_line_num = self.textCursor().blockNumber()
         block_number = block.blockNumber()
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
                 number = str(block_number + 1)
-                is_current = block_number == current_line
-                painter.setPen(QColor(colors.get('editor.foreground' if is_current else 'editorGutter.foreground')))
-                painter.drawText(0, int(top), self.line_number_area.width() - 5,
-                                 self.fontMetrics().height(), Qt.AlignmentFlag.AlignRight, number)
+                is_current = block_number == current_line_num
+                pen_color = colors.get(
+                    'editor.foreground' if is_current else
+                    'editorGutter.foreground'
+                )
+                painter.setPen(QColor(pen_color))
+                painter.drawText(
+                    0, int(top), self.line_number_area.width() - 5,
+                    self.fontMetrics().height(),
+                    Qt.AlignmentFlag.AlignRight, number
+                )
             block = block.next()
             top = bottom
             bottom = top + self.blockBoundingRect(block).height()
@@ -193,7 +232,8 @@ class MarkdownSourceEditor(QPlainTextEdit):
         if not cursor.hasSelection():
             cursor.insertText(f"{prefix}text{suffix}")
             cursor.movePosition(QTextCursor.MoveOperation.Left, n=len(suffix))
-            cursor.movePosition(QTextCursor.MoveOperation.Left, QTextCursor.MoveMode.KeepAnchor, n=4)
+            cursor.movePosition(QTextCursor.MoveOperation.Left,
+                                QTextCursor.MoveMode.KeepAnchor, n=4)
         else:
             text = cursor.selectedText()
             cursor.insertText(f"{prefix}{text}{suffix}")
@@ -283,7 +323,8 @@ class MarkdownEditorWidget(QWidget):
         self.viewer.source_focus_requested.connect(self._focus_source_text)
         self.search_input.returnPressed.connect(self.next_button.click)
         self.next_button.clicked.connect(lambda: self._find_text())
-        self.prev_button.clicked.connect(lambda: self._find_text(backwards=True))
+        self.prev_button.clicked.connect(
+            lambda: self._find_text(backwards=True))
         self.close_search_button.clicked.connect(self.search_bar.hide)
 
     def keyPressEvent(self, event):
@@ -302,7 +343,8 @@ class MarkdownEditorWidget(QWidget):
         if not query:
             return
         flags = QTextCursor.FindFlag(0)
-        if self.editor.find(query, flags | QTextCursor.FindFlag.FindCaseSensitively):
+        if self.editor.find(
+                query, flags | QTextCursor.FindFlag.FindCaseSensitively):
             flags |= QTextCursor.FindFlag.FindCaseSensitively
         if backwards:
             flags |= QTextCursor.FindFlag.FindBackward
@@ -319,8 +361,9 @@ class MarkdownEditorWidget(QWidget):
             return
         self.is_syncing_scroll = True
         editor_max = self.editor_scrollbar.maximum()
+        scroll_ratio = value / editor_max if editor_max > 0 else 0
         self.viewer_scrollbar.setValue(
-            int(self.viewer_scrollbar.maximum() * (value / editor_max if editor_max > 0 else 0)))
+            int(self.viewer_scrollbar.maximum() * scroll_ratio))
         self.is_syncing_scroll = False
 
     def _sync_editor_scroll(self, value):
@@ -328,8 +371,9 @@ class MarkdownEditorWidget(QWidget):
             return
         self.is_syncing_scroll = True
         viewer_max = self.viewer_scrollbar.maximum()
+        scroll_ratio = value / viewer_max if viewer_max > 0 else 0
         self.editor_scrollbar.setValue(
-            int(self.editor_scrollbar.maximum() * (value / viewer_max if viewer_max > 0 else 0)))
+            int(self.editor_scrollbar.maximum() * scroll_ratio))
         self.is_syncing_scroll = False
 
     def load_file(self, filepath: str):
@@ -348,9 +392,12 @@ class MarkdownEditorWidget(QWidget):
 
     def _render_preview(self):
         scroll_max = self.viewer_scrollbar.maximum()
-        old_pos_percent = self.viewer_scrollbar.value() / scroll_max if scroll_max > 0 else 0
+        old_pos_percent = (self.viewer_scrollbar.value() / scroll_max
+                           if scroll_max > 0 else 0)
         raw_text = self.editor.toPlainText()
-        html = markdown(raw_text, extensions=['fenced_code', 'tables', 'extra', 'sane_lists'])
+        html = markdown(raw_text,
+                        extensions=['fenced_code', 'tables', 'extra',
+                                    'sane_lists'])
         self.viewer.setHtml(html)
 
         def restore_scroll():
@@ -368,34 +415,54 @@ class MarkdownEditorWidget(QWidget):
         self.editor.update_line_number_area_width(0)
         editor_bg = colors.get('editor.background', '#2b2b2b')
         editor_fg = colors.get('editor.foreground', '#a9b7c6')
-        self.editor.setStyleSheet(f"background-color: {editor_bg}; color: {editor_fg}; "
-                                  f"border: none; padding: 0px;")
+        self.editor.setStyleSheet(
+            f"background-color: {editor_bg}; color: {editor_fg}; "
+            f"border: none; padding: 0px;")
         self.highlighter.rehighlight_document()
         if self.editor.formatting_toolbar:
             self.editor.formatting_toolbar.update_theme()
         viewer_bg = colors.get('window.background', '#2f383e')
         accent_color = colors.get('accent', '#88c0d0')
-        line_highlight_bg = colors.get('editor.lineHighlightBackground', '#323232')
+        line_highlight_bg = colors.get(
+            'editor.lineHighlightBackground', '#323232')
         comment_color = colors.get('syntax.comment', '#808080')
         string_color = colors.get('syntax.string', '#6A8759')
         style_sheet = f"""
-            h1, h2, h3, h4, h5, h6 {{ color: {accent_color};
-                                      border-bottom: 1px solid {line_highlight_bg};
-                                      padding-bottom: 4px; margin-top: 15px; }}
+            h1, h2, h3, h4, h5, h6 {{
+                color: {accent_color};
+                border-bottom: 1px solid {line_highlight_bg};
+                padding-bottom: 4px; margin-top: 15px;
+            }}
             a {{ color: {string_color}; text-decoration: none; }}
             a:hover {{ text-decoration: underline; }}
             p, li {{ font-size: {font_size}pt; }}
-            pre {{ background-color: {editor_bg}; border: 1px solid
-                   {colors.get('input.border', '#555')}; border-radius: 4px; padding: 10px;
-                   font-family: "{font_family}"; }}
-            code {{ background-color: {line_highlight_bg}; font-family: "{font_family}";
-                    border-radius: 2px; padding: 2px 4px; }}
-            blockquote {{ color: {comment_color}; border-left: 3px solid {accent_color};
-                          padding-left: 10px; margin-left: 5px; }}
+            pre {{
+                background-color: {editor_bg};
+                border: 1px solid {colors.get('input.border', '#555')};
+                border-radius: 4px; padding: 10px;
+                font-family: "{font_family}";
+            }}
+            code {{
+                background-color: {line_highlight_bg};
+                font-family: "{font_family}";
+                border-radius: 2px; padding: 2px 4px;
+            }}
+            blockquote {{
+                color: {comment_color};
+                border-left: 3px solid {accent_color};
+                padding-left: 10px; margin-left: 5px;
+            }}
             table {{ border-collapse: collapse; }}
-            th, td {{ border: 1px solid {colors.get('input.border', '#555')}; padding: 6px; }}
+            th, td {{
+                border: 1px solid {colors.get('input.border', '#555')};
+                padding: 6px;
+            }}
             th {{ background-color: {line_highlight_bg}; }}"""
         self.viewer.document().setDefaultStyleSheet(style_sheet)
-        self.viewer.document().setDefaultFont(QFont(settings_manager.get("font_family", "Arial"), font_size))
-        self.viewer.setStyleSheet(f"background-color: {viewer_bg}; border:none;")
+        default_font = QFont(
+            settings_manager.get("font_family", "Arial"), font_size
+        )
+        self.viewer.document().setDefaultFont(default_font)
+        self.viewer.setStyleSheet(
+            f"background-color: {viewer_bg}; border:none;")
         self._render_preview()

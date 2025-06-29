@@ -2,6 +2,7 @@
 import re
 from typing import List, Dict
 
+
 def lint_markdown_file(content: str) -> List[Dict]:
     """
     Performs a basic lint on Markdown content to find common errors.
@@ -29,7 +30,8 @@ def lint_markdown_file(content: str) -> List[Dict]:
                 'line': i + 1,
                 'col': 1,
                 'code': 'MD001',
-                'description': f"Fenced code block language '{lang}' should be on the same line as the opening ```."
+                'description': f"Fenced code block language '{lang}' should be "
+                               f"on the same line as the opening ```."
             })
 
     # Add more rules here in the future...

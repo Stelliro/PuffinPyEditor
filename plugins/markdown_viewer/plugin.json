@@ -1,7 +1,8 @@
 {
+    "id": "markdown_viewer",
     "name": "Markdown Viewer",
     "author": "AI Assistant",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Adds support for viewing rendered Markdown (.md) files in a separate tab. It intercepts file open calls to provide a rich text view instead of a plain text editor for .md files.",
     "entry_point": "plugin_main.py"
 }

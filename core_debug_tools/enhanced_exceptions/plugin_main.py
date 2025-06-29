@@ -34,5 +34,7 @@ class EnhancedExceptionsPlugin:
 def initialize(main_window, original_hook):
     """Entry point for the Enhanced Exceptions plugin."""
     if EnhancedExceptionsPlugin._instance is None:
-        EnhancedExceptionsPlugin._instance = EnhancedExceptionsPlugin(main_window, original_hook)
+        EnhancedExceptionsPlugin._instance = EnhancedExceptionsPlugin(
+            main_window, original_hook
+        )
     return EnhancedExceptionsPlugin._instance

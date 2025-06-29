@@ -76,7 +76,7 @@ class ExceptionDialog(QDialog):
         issue_title = quote_plus(f"Crash Report: {self.exception_type}")
 
         # The multi-line string's content should not have leading space
-        issue_body_template = f"""
+        issue_body_template = """
 **Describe the bug**
 A clear and concise description of what the bug is. What were you doing when the crash occurred?
 
@@ -93,5 +93,8 @@ Steps to reproduce the behavior:
 """
         issue_body = quote_plus(issue_body_template.strip())
 
-        url = QUrl(f"https://github.com/Stelliro/PuffinPyEditor/issues/new?title={issue_title}&body={issue_body}")
+        url = QUrl(
+            f"https://github.com/Stelliro/PuffinPyEditor/issues/new?title="
+            f"{issue_title}&body={issue_body}"
+        )
         QDesktopServices.openUrl(url)
