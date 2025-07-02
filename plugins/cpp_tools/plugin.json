@@ -1,0 +1,11 @@
+{
+    "id": "cpp_tools",
+    "name": "C++ Tools",
+    "author": "PuffinPy Team",
+    "version": "1.0.0",
+    "description": "Adds syntax highlighting and compile/run support for C/C++ files.",
+    "entry_point": "plugin_main.py",
+    "dependencies": {
+        "python_runner": ">=1.1.1"
+    }
+}

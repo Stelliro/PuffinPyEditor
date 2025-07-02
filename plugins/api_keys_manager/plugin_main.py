@@ -1,13 +1,10 @@
 # PuffinPyEditor/plugins/api_keys_manager/plugin_main.py
 from .api_keys_settings_page import ApiKeysDialog
-
+from app_core.puffin_api import PuffinPluginAPI
 
 class ApiKeysManagerPlugin:
-    def __init__(self, main_window):
-        self.api = main_window.puffin_api
-        self.settings_manager = self.api.get_manager("settings")
-        self.main_window = self.api.get_main_window()
-
+    def __init__(self, puffin_api: PuffinPluginAPI):
+        self.api = puffin_api
         self.api.add_menu_action(
             menu_name="tools",
             text="Manage API Keys...",
@@ -16,10 +13,9 @@ class ApiKeysManagerPlugin:
         )
 
     def show_api_keys_dialog(self):
-        """Create and show the API keys management dialog."""
-        dialog = ApiKeysDialog(self.settings_manager, self.main_window)
+        settings_manager = self.api.get_manager("settings")
+        dialog = ApiKeysDialog(settings_manager, self.api.get_main_window())
         dialog.exec()
 
-
-def initialize(main_window):
-    return ApiKeysManagerPlugin(main_window)
+def initialize(puffin_api: PuffinPluginAPI):
+    return ApiKeysManagerPlugin(puffin_api)

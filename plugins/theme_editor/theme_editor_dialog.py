@@ -1,4 +1,4 @@
-# PuffinPyEditor/ui/theme_editor_dialog.py
+# PuffinPyEditor/plugins/theme_editor/theme_editor_dialog.py
 import re
 import datetime
 import copy
@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
 from PyQt6.QtGui import QColor, QFont, QPixmap, QIcon
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from utils.logger import log
-from app_core.theme_manager import theme_manager
 
 
 class ColorPickerButton(QPushButton):
@@ -53,18 +52,21 @@ class ThemeEditorDialog(QDialog):
     """A dialog for creating, editing, and deleting UI themes."""
     custom_themes_changed = pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, theme_manager, parent=None):
         super().__init__(parent)
+        self.theme_manager = theme_manager
         log.info("ThemeEditorDialog initializing...")
         self.setWindowTitle("Theme Customizer")
         self.setMinimumSize(QSize(950, 700))
         self.setModal(True)
+        # MODIFIED: Added missing color keys to the group definitions for a complete UI
         self.COLOR_GROUPS = {
             "Window & General": ["window.background", "sidebar.background", "accent"],
             "Editor": ["editor.background", "editor.foreground",
-                       "editor.lineHighlightBackground"],
+                       "editor.lineHighlightBackground", "editor.selectionBackground"],
             "Editor Gutter": ["editorGutter.background",
-                              "editorGutter.foreground"],
+                              "editorGutter.foreground", "editorLineNumber.foreground",
+                              "editorLineNumber.activeForeground", "editor.breakpoint.color"],
             "Editor Matching": ["editor.matchingBracketBackground",
                                 "editor.matchingBracketForeground"],
             "Controls": ["button.background", "button.foreground",
@@ -159,14 +161,14 @@ class ThemeEditorDialog(QDialog):
     def _repopulate_theme_list(self, select_theme_id=None):
         self.theme_list_widget.blockSignals(True)
         self.theme_list_widget.clear()
-        all_themes = theme_manager.get_available_themes_for_ui()
+        all_themes = self.theme_manager.get_available_themes_for_ui()
         target_row = 0
         current_selection = (select_theme_id or self.current_theme_id or
-                             theme_manager.current_theme_id)
+                             self.theme_manager.current_theme_id)
         for i, (theme_id, name) in enumerate(all_themes.items()):
             item = QListWidgetItem(name)
             item.setData(Qt.ItemDataRole.UserRole, theme_id)
-            theme_data = theme_manager.get_theme_data_by_id(theme_id)
+            theme_data = self.theme_manager.all_themes_data.get(theme_id, {})
             if theme_data and theme_data.get("is_custom"):
                 item.setFont(QFont(self.font().family(), -1, QFont.Weight.Bold))
             self.theme_list_widget.addItem(item)
@@ -203,7 +205,7 @@ class ThemeEditorDialog(QDialog):
             self._load_theme_to_editor()
 
     def _load_theme_to_editor(self):
-        theme_data = theme_manager.get_theme_data_by_id(self.current_theme_id)
+        theme_data = self.theme_manager.all_themes_data.get(self.current_theme_id, {})
         if not theme_data or "colors" not in theme_data:
             self._clear_editor()
             return
@@ -230,7 +232,7 @@ class ThemeEditorDialog(QDialog):
             grid.setSpacing(5)
             row, col = 0, 0
             for key in group_keys:
-                color_val = QColor(theme_data["colors"][key])
+                color_val = QColor(theme_data["colors"].get(key, '#ff00ff'))
                 picker = ColorPickerButton(key, color_val)
                 picker.setEnabled(self.is_custom_theme)
                 picker.color_changed.connect(self._mark_unsaved_changes)
@@ -251,7 +253,7 @@ class ThemeEditorDialog(QDialog):
         if not self.current_theme_id:
             return
         original_theme = copy.deepcopy(
-            theme_manager.get_theme_data_by_id(self.current_theme_id)
+            self.theme_manager.all_themes_data.get(self.current_theme_id)
         )
         if not original_theme:
             return
@@ -265,14 +267,14 @@ class ThemeEditorDialog(QDialog):
         original_theme['author'] = "PuffinPy User"
         original_theme['is_custom'] = True
 
-        theme_manager.add_or_update_custom_theme(new_id, original_theme)
+        self.theme_manager.add_or_update_custom_theme(new_id, original_theme)
         self.custom_themes_changed.emit()
         self._repopulate_theme_list(select_theme_id=new_id)
 
     def _action_delete_theme(self):
         if not self.current_theme_id or not self.is_custom_theme:
             return
-        theme_data = theme_manager.get_theme_data_by_id(self.current_theme_id)
+        theme_data = self.theme_manager.all_themes_data.get(self.current_theme_id)
         theme_name = theme_data.get('name', self.current_theme_id)
         reply = QMessageBox.question(
             self, "Confirm Delete",
@@ -281,28 +283,28 @@ class ThemeEditorDialog(QDialog):
             QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            theme_manager.delete_custom_theme(self.current_theme_id)
+            self.theme_manager.delete_custom_theme(self.current_theme_id)
             self.custom_themes_changed.emit()
-            if self.current_theme_id == theme_manager.current_theme_id:
-                theme_manager.set_theme("puffin_dark")
+            if self.current_theme_id == self.theme_manager.current_theme_id:
+                self.theme_manager.set_theme("puffin_dark")
             self._repopulate_theme_list(select_theme_id="puffin_dark")
 
     def _action_save(self):
         if not self.is_custom_theme or not self.unsaved_changes:
             return
         theme_data = copy.deepcopy(
-            theme_manager.get_theme_data_by_id(self.current_theme_id)
+            self.theme_manager.all_themes_data.get(self.current_theme_id)
         )
         theme_data['name'] = self.name_edit.text()
         for key, widget in self.color_widgets.items():
             theme_data['colors'][key] = widget.get_color().name()
 
-        theme_manager.add_or_update_custom_theme(self.current_theme_id, theme_data)
+        self.theme_manager.add_or_update_custom_theme(self.current_theme_id, theme_data)
         self.custom_themes_changed.emit()
         self.unsaved_changes = False
         self._update_ui_state()
-        if self.current_theme_id == theme_manager.current_theme_id:
-            theme_manager.set_theme(self.current_theme_id)
+        if self.current_theme_id == self.theme_manager.current_theme_id:
+            self.theme_manager.set_theme(self.current_theme_id)
         QMessageBox.information(
             self, "Success", f"Theme '{theme_data['name']}' has been updated."
         )

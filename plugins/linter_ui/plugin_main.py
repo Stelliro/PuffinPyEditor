@@ -1,19 +1,16 @@
 # PuffinPyEditor/plugins/linter_ui/plugin_main.py
 from PyQt6.QtCore import Qt
 from .problems_panel import ProblemsPanel
-# from ui.editor_widget import EditorWidget # This top-level import is removed
-
 
 class LinterUIPlugin:
-    def __init__(self, main_window):
-        # Deferred import to prevent circular dependencies
+    def __init__(self, puffin_api):
         from ui.editor_widget import EditorWidget
         self.EditorWidgetClass = EditorWidget
 
-        self.main_window = main_window
-        self.api = main_window.puffin_api
+        self.api = puffin_api
+        self.main_window = self.api.get_main_window()
         self.linter_manager = self.api.get_manager("linter")
-        self.problems_panel = ProblemsPanel(main_window)
+        self.problems_panel = ProblemsPanel(self.main_window)
         self._setup_ui()
         self._connect_signals()
 
@@ -42,6 +39,5 @@ class LinterUIPlugin:
         if filepath:
             self.problems_panel.update_problems({filepath: problems})
 
-
-def initialize(main_window):
-    return LinterUIPlugin(main_window)
+def initialize(puffin_api):
+    return LinterUIPlugin(puffin_api)

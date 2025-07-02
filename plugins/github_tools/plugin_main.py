@@ -10,30 +10,23 @@ from PyQt6.QtWidgets import (QInputDialog, QMessageBox, QProgressDialog,
 from PyQt6.QtCore import Qt, QCoreApplication
 from PyQt6.QtGui import QFont
 
+from app_core.puffin_api import PuffinPluginAPI
 from .new_release_dialog import NewReleaseDialog
 from .select_repo_dialog import SelectRepoDialog
 from .github_dialog import GitHubDialog
 from utils import versioning
 
-
 class GitHubToolsPlugin:
-    def __init__(self, main_window):
-        self.main_window = main_window
-        self.api = main_window.puffin_api
+    def __init__(self, puffin_api: PuffinPluginAPI):
+        self.api = puffin_api
+        self.main_window = self.api.get_main_window()
         self.project_manager = self.api.get_manager("project")
         self.git_manager = self.api.get_manager("git")
         self.github_manager = self.api.get_manager("github")
-
         self.github_dialog = None
-        self._release_state = {}  # Central dictionary to manage release state
-
+        self._release_state = {}
         self.api.log_info("GitHub Tools plugin initialized.")
-
-        self.api.add_menu_action(
-            "tools", "Build Project Installer",
-            self._show_build_installer_dialog,
-            icon_name="fa5s.cogs"
-        )
+        self.api.add_menu_action("tools", "Build Project Installer", self._show_build_installer_dialog, icon_name="fa5s.cogs")
 
     def _get_sc_panel(self):
         # FIX: The plugin manager stores Plugin objects, not dicts.
@@ -503,18 +496,9 @@ class GitHubToolsPlugin:
         self.github_dialog.show()
 
 
-def initialize(main_window):
-    """
-    Initializes the GitHub Tools plugin.
-    """
-    plugin = GitHubToolsPlugin(main_window)
-    plugin.api.add_menu_action(
-        "tools", "GitHub Repositories...", plugin._show_github_dialog,
-        icon_name="fa5b.github")
-
-    plugin.api.add_menu_action(
-        "tools", "New Release...", plugin.show_create_release_dialog,
-        icon_name="fa5s.tag"
-    )
-
+def initialize(puffin_api: PuffinPluginAPI):
+    """Initializes the GitHub Tools plugin."""
+    plugin = GitHubToolsPlugin(puffin_api)
+    puffin_api.add_menu_action("tools", "GitHub Repositories...", plugin._show_github_dialog, icon_name="fa5b.github")
+    puffin_api.add_menu_action("tools", "New Release...", plugin.show_create_release_dialog, icon_name="fa5s.tag")
     return plugin

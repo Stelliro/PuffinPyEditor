@@ -184,8 +184,4 @@ Contributions are welcome! Whether it's reporting a bug, suggesting a new featur
 ## 📜 License
 This project is licensed under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License**.
 
-<<<<<<< HEAD
 In short, you are free to share and adapt the material for **non-commercial purposes**, as long as you give appropriate credit and distribute your contributions under the same license. For the full license text, please see the `LICENSE.md` file.
-=======
-In short, you are free to share and adapt the material for **non-commercial purposes**, as long as you give appropriate credit and distribute your contributions under the same license. For the full license text, please see the `LICENSE.md` file.
->>>>>>> 2cb8df81f80b3506528118e14815f59be6237f8f

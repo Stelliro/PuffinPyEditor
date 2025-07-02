@@ -3,18 +3,20 @@ from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QMouseEvent, QPainter, QColor
 from PyQt6.QtCore import QSize, pyqtSignal, Qt
 
+from utils.logger import log
+
 
 class BreakpointArea(QWidget):
-    """A widget that displays and handles breakpoint toggling with a hover effect."""
+    """
+    A gutter widget that displays and handles breakpoint toggling with a
+    clear hover effect.
+    """
     breakpoint_toggled = pyqtSignal(int)
 
-    def __init__(self, editor_widget):
+    def __init__(self, editor_widget: 'EditorWidget'):
         super().__init__(editor_widget)
-        self.editor_widget = editor_widget
-        
-        # [NEW] Enable mouse tracking to get hover events
+        self.editor = editor_widget
         self.setMouseTracking(True)
-        # [NEW] Variable to store the line number currently being hovered over
         self.hovered_line = -1
 
     def sizeHint(self) -> QSize:
@@ -23,75 +25,87 @@ class BreakpointArea(QWidget):
     def minimumSizeHint(self) -> QSize:
         return QSize(20, 0)
 
-    # [NEW] Track when the mouse enters the widget
     def enterEvent(self, event):
-        self.update() # Trigger a repaint
+        self.update()  # Redraw to show potential hover
         super().enterEvent(event)
 
-    # [NEW] Clear hover state when the mouse leaves
     def leaveEvent(self, event):
         self.hovered_line = -1
-        self.update()
+        self.update()  # Redraw to remove hover
         super().leaveEvent(event)
 
-    # [NEW] Detect which line is being hovered over
     def mouseMoveEvent(self, event: QMouseEvent):
-        text_area = self.editor_widget.text_area
-        cursor = text_area.cursorForPosition(event.pos())
-        line_num = cursor.block().blockNumber() + 1
-        
-        # If the hovered line has changed, update the state and trigger a repaint
-        if line_num != self.hovered_line:
-            self.hovered_line = line_num
-            self.update()
-        
+        """Calculates which line number is under the cursor."""
+        try:
+            # Use the editor's cursorForPosition method, which is the most reliable way
+            # to determine the block (line) at a specific y-coordinate.
+            cursor = self.editor.text_area.cursorForPosition(event.pos())
+            line_num = -1
+            if cursor.block().isValid():
+                line_num = cursor.block().blockNumber() + 1
+
+            if line_num != self.hovered_line:
+                self.hovered_line = line_num
+                self.update()
+        except Exception as e:
+            log.error(f"Error in BreakpointArea mouseMoveEvent: {e}", exc_info=False)
         super().mouseMoveEvent(event)
 
-    # [MODIFIED] paintEvent now includes logic to draw the hover indicator
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        """Toggles the breakpoint on the hovered line."""
+        if event.button() == Qt.MouseButton.LeftButton and self.hovered_line != -1:
+            self.breakpoint_toggled.emit(self.hovered_line)
+        super().mousePressEvent(event)
+
     def paintEvent(self, event) -> None:
-        painter = QPainter(self)
-        colors = self.editor_widget.theme_manager.current_theme_data['colors']
-        
-        # Define colors
+        """Paints the breakpoints and hover indicators."""
+        try:
+            painter = QPainter(self)
+        except Exception as e:
+            log.error(f"Could not create QPainter for breakpoints: {e}")
+            return
+
+        colors = self.editor.theme_manager.current_theme_data.get('colors', {})
         bg_color = QColor(colors.get('editorGutter.background', '#2c313a'))
         breakpoint_color = QColor(colors.get('editor.breakpoint.color', 'crimson'))
-        hover_color = QColor(colors.get('editorGutter.foreground', '#888888'))
-        hover_color.setAlpha(128) # Make it semi-transparent
+
+        # A more visible hover color
+        hover_base_color = QColor(colors.get('editorGutter.foreground', '#888888'))
+        hover_color = QColor(hover_base_color)
+        hover_color.setAlpha(128)  # semi-transparent
 
         painter.fillRect(event.rect(), bg_color)
-        
-        text_area = self.editor_widget.text_area
-        offset = text_area.contentOffset()
+
+        # Get editor state
+        text_area = self.editor.text_area
+        content_offset = text_area.contentOffset()
+
+        # Iterate through visible blocks to draw markers
         block = text_area.firstVisibleBlock()
-        
-        while block.isValid() and block.isVisible():
-            geom = text_area.blockBoundingGeometry(block).translated(offset)
-            line_num = block.blockNumber() + 1
-            
-            radius = 4
-            dot_x = self.width() // 2 - radius
-            dot_y = int(geom.top() + (geom.height() - radius * 2) / 2)
+        while block.isValid():
+            block_top = text_area.blockBoundingGeometry(block).translated(content_offset).top()
 
-            # --- Main Drawing Logic ---
-            if line_num in self.editor_widget.breakpoints:
-                # If there's a breakpoint, draw the solid red dot
-                painter.setBrush(breakpoint_color)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.drawEllipse(dot_x, dot_y, radius * 2, radius * 2)
-            elif line_num == self.hovered_line:
-                # Otherwise, if we are hovering here, draw the "ghost" dot
-                painter.setBrush(hover_color)
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.drawEllipse(dot_x, dot_y, radius * 2, radius * 2)
-            
-            if geom.top() > self.height():
+            # Stop if we've drawn past the visible area
+            if block_top > event.rect().bottom():
                 break
-            
-            block = block.next()
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            # The hover line is always the correct line to toggle
-            if self.hovered_line != -1:
-                self.breakpoint_toggled.emit(self.hovered_line)
-        super().mousePressEvent(event)
+            if block.isVisible():
+                line_num = block.blockNumber() + 1
+                radius = 5  # Larger radius for better visibility
+                center_x = self.width() / 2
+                # Center the dot vertically within the line's bounding rect
+                center_y = block_top + (text_area.blockBoundingRect(block).height() / 2)
+
+                painter.setPen(Qt.PenStyle.NoPen)
+
+                if line_num in self.editor.breakpoints:
+                    painter.setBrush(breakpoint_color)
+                    painter.drawEllipse(int(center_x - radius), int(center_y - radius), int(radius * 2),
+                                        int(radius * 2))
+                elif line_num == self.hovered_line:
+                    # Draw a hollow circle for the hover indicator
+                    painter.setBrush(hover_color)
+                    painter.drawEllipse(int(center_x - radius), int(center_y - radius), int(radius * 2),
+                                        int(radius * 2))
+
+            block = block.next()

@@ -7,15 +7,24 @@ import re
 from typing import Optional, Tuple, Any, Dict
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 from PyQt6.QtGui import QGuiApplication, QDesktopServices
-from PyQt6.QtCore import QUrl
+from PyQt6.QtCore import QUrl, pyqtSignal, QObject
 from .settings_manager import settings_manager
 from utils.logger import log
 
 
-class FileHandler:
+class FileHandler(QObject):  # MODIFIED: Inherit from QObject to support signals
     """Handles all direct file and folder operations for the application."""
 
+    # NEW SIGNALS
+    # Emits (item_type: str, absolute_path: str)
+    item_created = pyqtSignal(str, str)
+    # Emits (item_type: str, old_path: str, new_path: str)
+    item_renamed = pyqtSignal(str, str, str)
+    # Emits (item_type: str, absolute_path: str)
+    item_deleted = pyqtSignal(str, str)
+
     def __init__(self, parent_window: Optional[Any] = None):
+        super().__init__()  # MODIFIED: Call QObject constructor
         self.parent_window = parent_window
         self._internal_clipboard: Dict[str, Optional[str]] = {
             "operation": None, "path": None
@@ -116,10 +125,12 @@ class FileHandler:
         """Creates a new, empty file at the given path."""
         try:
             if os.path.exists(path):
-                return False, f"'{os.path.basename(path)}' already exists."
+                item_type = "folder" if os.path.isdir(path) else "file"
+                return False, f"A {item_type} named '{os.path.basename(path)}' already exists."
             with open(path, 'w', encoding='utf-8'):
                 pass  # Create an empty file
             log.info(f"Created file: {path}")
+            self.item_created.emit("file", path)  # NEW: Emit signal
             return True, None
         except OSError as e:
             log.error(f"Failed to create file at {path}: {e}", exc_info=True)
@@ -129,9 +140,11 @@ class FileHandler:
         """Creates a new directory at the given path."""
         try:
             if os.path.exists(path):
-                return False, f"'{os.path.basename(path)}' already exists."
+                item_type = "folder" if os.path.isdir(path) else "file"
+                return False, f"A {item_type} named '{os.path.basename(path)}' already exists."
             os.makedirs(path)
             log.info(f"Created folder: {path}")
+            self.item_created.emit("folder", path)  # NEW: Emit signal
             return True, None
         except OSError as e:
             log.error(f"Failed to create folder at {path}: {e}", exc_info=True)
@@ -150,9 +163,13 @@ class FileHandler:
         new_path = os.path.join(os.path.dirname(old_path), new_name)
         if os.path.exists(new_path):
             return False, f"'{new_name}' already exists here."
+
+        item_type = 'folder' if os.path.isdir(old_path) else 'file'
+
         try:
             os.rename(old_path, new_path)
             log.info(f"Renamed '{old_path}' to '{new_path}'")
+            self.item_renamed.emit(item_type, old_path, new_path)  # NEW: Emit signal
             return True, new_path
         except OSError as e:
             log.error(f"Failed to rename '{old_path}': {e}", exc_info=True)
@@ -160,12 +177,15 @@ class FileHandler:
 
     def delete_item(self, path: str) -> Tuple[bool, Optional[str]]:
         """Deletes a file or an entire directory tree."""
+        is_file = os.path.isfile(path)
+        item_type = 'file' if is_file else 'folder'
         try:
-            if os.path.isfile(path):
+            if is_file:
                 os.remove(path)
             elif os.path.isdir(path):
                 shutil.rmtree(path)
             log.info(f"Deleted item: {path}")
+            self.item_deleted.emit(item_type, path)  # NEW: Emit signal
             return True, None
         except (OSError, shutil.Error) as e:
             log.error(f"Failed to delete '{path}': {e}", exc_info=True)
@@ -187,8 +207,6 @@ class FileHandler:
     def reveal_in_explorer(self, path: str):
         """Opens the system file browser to the location of the given path."""
         try:
-            # If the path is a file, open its parent directory and select it.
-            # If it's a directory, open the directory itself.
             path_to_show = os.path.normpath(path)
             if sys.platform == 'win32':
                 if os.path.isdir(path_to_show):
@@ -273,6 +291,37 @@ class FileHandler:
         except (OSError, shutil.Error) as e:
             log.error(f"Paste operation failed: {e}", exc_info=True)
             return False, f"Paste operation failed: {e}"
+
+    def move_item(self, src_path: str, dest_dir: str) -> Tuple[bool, str]:
+        """
+        Moves a file or folder to a new directory (for drag-and-drop).
+
+        Returns:
+            A tuple of (success, new_path_or_error_msg).
+        """
+        if not os.path.exists(src_path):
+            return False, "Source path does not exist."
+        if not os.path.isdir(dest_dir):
+            return False, "Destination must be a folder."
+
+        base_name = os.path.basename(src_path)
+        dest_path = os.path.join(dest_dir, base_name)
+        if os.path.normpath(src_path) == os.path.normpath(dest_path):
+            return True, dest_path  # Dropped on itself, do nothing.
+
+        if os.path.exists(dest_path):
+            return False, f"'{base_name}' already exists in the destination."
+
+        if os.path.isdir(src_path) and os.path.normpath(dest_dir).startswith(os.path.normpath(src_path)):
+            return False, "Cannot move a folder into its own subdirectory."
+
+        try:
+            shutil.move(src_path, dest_path)
+            log.info(f"Moved '{src_path}' to '{dest_path}'")
+            return True, dest_path
+        except (OSError, shutil.Error) as e:
+            log.error(f"Move operation failed: {e}", exc_info=True)
+            return False, f"Move operation failed: {e}"
 
     def get_clipboard_status(self) -> Optional[str]:
         return self._internal_clipboard.get("operation")

@@ -1,8 +1,0 @@
-{
-    "id": "project_explorer",
-    "name": "Project Explorer",
-    "author": "PuffinPy Team",
-    "version": "1.0.0",
-    "description": "Provides a dockable file tree view for open projects.",
-    "entry_point": "plugin_main.py"
-}

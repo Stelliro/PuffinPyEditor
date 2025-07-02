@@ -1,20 +1,19 @@
-# PuffinPyEditor/ui/main_window.py
+# /ui/main_window.py
 import os
 import sys
 from functools import partial
-from typing import Optional, Callable
-from PyQt6.QtGui import (QKeySequence, QAction, QDesktopServices, QCloseEvent, QActionGroup)
+from typing import Optional
+from PyQt6.QtGui import (QKeySequence, QAction, QCloseEvent, QDesktopServices, QIcon, QActionGroup)
 from PyQt6.QtWidgets import (QMessageBox, QMenu, QWidget, QVBoxLayout, QHBoxLayout,
-                             QMainWindow, QStatusBar,
-                             QTabWidget, QLabel, QToolButton, QToolBar, QSizePolicy, QApplication,
-                             QFileDialog)
-from PyQt6.QtCore import (Qt, pyqtSignal, QTimer, QSize, QUrl)
-import qtawesome as qta
+                             QMainWindow, QStatusBar, QTabWidget, QLabel, QToolButton,
+                             QToolBar, QSizePolicy, QApplication, QFileDialog, QDockWidget)
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QUrl
 
+import qtawesome as qta
 from utils.logger import log
 from utils import versioning
 from app_core.file_handler import FileHandler
-from app_core.theme_manager import ThemeManager, theme_manager
+from app_core.theme_manager import theme_manager
 from app_core.settings_manager import settings_manager
 from app_core.project_manager import ProjectManager
 from app_core.linter_manager import LinterManager
@@ -26,6 +25,8 @@ from app_core.github_manager import GitHubManager
 from app_core.puffin_api import PuffinPluginAPI
 from .editor_widget import EditorWidget
 from .preferences_dialog import PreferencesDialog
+from .widgets.syntax_highlighter import PythonSyntaxHighlighter
+from plugins.tab_drag_handler.draggable_tab_widget import DraggableTabWidget
 
 
 class MainWindow(QMainWindow):
@@ -35,18 +36,16 @@ class MainWindow(QMainWindow):
 
     def __init__(self, file_handler, theme_manager, debug_mode=False, parent=None):
         super().__init__(parent)
-
-        self.file_handler = file_handler
+        self.file_handler = file_handler;
         self.file_handler.parent_window = self
-        self.theme_manager = theme_manager
+        self.theme_manager = theme_manager;
         self.debug_mode = debug_mode
         self.preferences_dialog = None
-        log.info(f"PuffinPyEditor v{versioning.APP_VERSION} starting... (Debug: {self.debug_mode})")
+        self._bottom_tab_widget: Optional[QTabWidget] = None
+        self._bottom_dock_widget: Optional[QDockWidget] = None
 
         self._initialize_managers()
         self.puffin_api = PuffinPluginAPI(self)
-        self.file_open_handlers = {}
-        log.info("Core API initialized.")
 
         self.setWindowTitle(f"PuffinPyEditor - v{versioning.APP_VERSION}")
         self._load_window_geometry()
@@ -61,13 +60,10 @@ class MainWindow(QMainWindow):
         if self.debug_mode:
             try:
                 from core_debug_tools.enhanced_exceptions.plugin_main import initialize as init_eh
-                self.eh_instance = init_eh(self, sys.excepthook)
-                log.info("Core debug tool 'Enhanced Exceptions' loaded manually.")
+                self.eh_instance = init_eh(self.puffin_api, sys.excepthook)
                 plugins_to_ignore.append('enhanced_exceptions')
             except Exception as e:
                 log.error(f"Failed to load core exception handler: {e}", exc_info=True)
-                QMessageBox.critical(self, "Debug Tools Failed",
-                                     f"Could not initialize core exception handler.\n\nError: {e}")
 
         self.plugin_manager = PluginManager(self)
         self.plugin_manager.discover_and_load_plugins(ignore_list=plugins_to_ignore)
@@ -87,29 +83,29 @@ class MainWindow(QMainWindow):
         self.update_manager = UpdateManager(self)
         self.actions = {}
         self.editor_tabs_data = {}
-        self.lint_timer = QTimer(self)
-        self.lint_timer.setSingleShot(True)
+        self.file_open_handlers = {}
+        self.lint_timer = QTimer(self);
+        self.lint_timer.setSingleShot(True);
         self.lint_timer.setInterval(1500)
-        self.auto_save_timer = QTimer(self)
+        self.auto_save_timer = QTimer(self);
         self.auto_save_timer.setSingleShot(True)
 
     def _load_window_geometry(self):
-        size = self.settings.get("window_size", [1600, 1000])
-        pos = self.settings.get("window_position")
-        self.resize(QSize(size[0], size[1]))
+        size, pos = self.settings.get("window_size", [1600, 1000]), self.settings.get("window_position")
+        self.resize(QSize(size[0], size[1]));
         if pos: self.move(pos[0], pos[1])
 
     def _create_core_widgets(self):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
-        self.tab_widget = QTabWidget()
-        button = QToolButton()
-        button.setIcon(qta.icon('fa5s.plus'))
+        self.tab_widget = DraggableTabWidget(self)
+        button = QToolButton();
+        button.setIcon(qta.icon('fa5s.plus'));
         button.setAutoRaise(True)
-        button.clicked.connect(self._add_new_tab)
+        button.clicked.connect(lambda: self._add_new_tab())
         self.tab_widget.setCornerWidget(button, Qt.Corner.TopRightCorner)
-        self.tab_widget.setDocumentMode(True)
-        self.tab_widget.setTabsClosable(True)
+        self.tab_widget.setDocumentMode(True);
+        self.tab_widget.setTabsClosable(True);
         self.tab_widget.setMovable(True)
 
     def _create_core_actions(self):
@@ -128,42 +124,35 @@ class MainWindow(QMainWindow):
             action = QAction(text, self)
             if icon: action.setData(icon)
             if sc: action.setShortcut(QKeySequence(sc))
-            action.triggered.connect(cb)
+            action.triggered.connect(cb);
             self.actions[key] = action
 
     def _create_core_menu(self):
-        menu_bar = self.menuBar()
-        self.file_menu = menu_bar.addMenu("&File")
-        self.edit_menu = menu_bar.addMenu("&Edit")
-        self.view_menu = menu_bar.addMenu("&View")
-        self.tools_menu = menu_bar.addMenu("&Tools")
-        self.help_menu = menu_bar.addMenu("&Help")
+        mb = self.menuBar()
+        self.file_menu, self.edit_menu, self.view_menu = mb.addMenu("&File"), mb.addMenu("&Edit"), mb.addMenu("&View")
+        self.run_menu, self.tools_menu, self.help_menu = mb.addMenu("&Run"), mb.addMenu("&Tools"), mb.addMenu("&Help")
 
         self.file_menu.addActions([self.actions[k] for k in ["new_file", "open_file"]])
         self.recent_files_menu = self.file_menu.addMenu("Open &Recent")
-        self.file_menu.addSeparator()
+        self.file_menu.addSeparator();
         self.file_menu.addActions([self.actions[k] for k in ["open_folder", "close_project"]])
-        self.file_menu.addSeparator()
+        self.file_menu.addSeparator();
         self.file_menu.addActions([self.actions[k] for k in ["save", "save_as", "save_all"]])
-        self.file_menu.addSeparator()
-        self.file_menu.addAction(self.actions["preferences"])
+        self.file_menu.addSeparator();
+        self.file_menu.addAction(self.actions["preferences"]);
         self.file_menu.addSeparator()
         self.file_menu.addAction(self.actions["exit"])
-
         self.theme_menu = self.view_menu.addMenu("&Themes")
-
-        about_action = QAction("About PuffinPyEditor", self, triggered=self._show_about_dialog)
-        github_action = QAction("View on GitHub", self, triggered=self._open_github_link)
-        self.help_menu.addAction(about_action)
-        self.help_menu.addAction(github_action)
+        self.help_menu.addAction("About PuffinPyEditor", self._show_about_dialog);
+        self.help_menu.addAction("View on GitHub", self._open_github_link)
 
     def _create_toolbar(self):
         self.main_toolbar = QToolBar("Main Toolbar");
-        self.main_toolbar.setIconSize(QSize(18, 18))
+        self.main_toolbar.setIconSize(QSize(18, 18));
         self.addToolBar(self.main_toolbar)
         self.main_toolbar.addActions([self.actions[k] for k in ["new_file", "open_file", "save"]])
         spacer = QWidget();
-        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred);
         self.main_toolbar.addWidget(spacer)
         self.main_toolbar.addAction(self.actions["preferences"])
 
@@ -173,8 +162,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.tab_widget)
 
     def _create_statusbar(self):
-        self.setStatusBar(QStatusBar(self))
-        self.cursor_label = QLabel(" Ln 1, Col 1 ")
+        self.setStatusBar(QStatusBar(self));
+        self.cursor_label = QLabel(" Ln 1, Col 1 ");
         self.statusBar().addPermanentWidget(self.cursor_label)
 
     def _connect_signals(self):
@@ -185,15 +174,14 @@ class MainWindow(QMainWindow):
         self.auto_save_timer.timeout.connect(self._auto_save_current_tab)
 
     def _apply_theme_and_icons(self, theme_id: str):
-        self.theme_manager.set_theme(theme_id, QApplication.instance())
+        self.theme_manager.set_theme(theme_id, QApplication.instance());
         self.theme_changed_signal.emit(theme_id)
         for action in self.actions.values():
             if icon_name := action.data(): action.setIcon(qta.icon(icon_name))
         self._rebuild_theme_menu()
         for i in range(self.tab_widget.count()):
-            widget = self.tab_widget.widget(i)
-            if hasattr(widget, 'update_theme'): widget.update_theme()
-        self._broadcast_project_change()
+            if hasattr(widget := self.tab_widget.widget(i), 'update_theme'): widget.update_theme()
+        if hasattr(self, 'project_manager'): self.project_manager.projects_changed.emit()
 
     def _rebuild_theme_menu(self):
         self.theme_menu.clear();
@@ -208,49 +196,91 @@ class MainWindow(QMainWindow):
             self.theme_menu.addAction(action)
 
     def _post_init_setup(self):
-        self._update_recent_files_menu()
-        self._broadcast_project_change()
+        self._update_recent_files_menu();
         self._update_window_title()
         if self.tab_widget.count() == 0: self._add_new_tab(is_placeholder=True)
 
+    def add_dock_panel(self, panel_widget: QWidget, title: str, area: Qt.DockWidgetArea,
+                       icon_name: Optional[str] = None):
+        if area == Qt.DockWidgetArea.BottomDockWidgetArea:
+            if self._bottom_tab_widget is None:
+                log.info("Creating shared bottom dock area.");
+                self._bottom_dock_widget = QDockWidget("Info Panels", self)
+                self._bottom_dock_widget.setObjectName("SharedBottomDock");
+                self._bottom_tab_widget = QTabWidget()
+                self._bottom_tab_widget.setDocumentMode(True);
+                self._bottom_dock_widget.setWidget(self._bottom_tab_widget)
+                self.addDockWidget(area, self._bottom_dock_widget)
+                if self.view_menu: self.view_menu.addSeparator(); self.view_menu.addAction(
+                    self._bottom_dock_widget.toggleViewAction())
+            icon = qta.icon(icon_name) if icon_name else QIcon();
+            self._bottom_tab_widget.addTab(panel_widget, icon, title)
+        else:
+            dock = QDockWidget(title, self);
+            dock.setWidget(panel_widget)
+            if icon_name: dock.setWindowIcon(qta.icon(icon_name))
+            self.addDockWidget(area, dock)
+            if self.view_menu: self.view_menu.addSeparator(); self.view_menu.addAction(dock.toggleViewAction())
+
     def _add_new_tab(self, filepath=None, content="", is_placeholder=False):
-        if self.tab_widget.count() == 1 and isinstance(self.tab_widget.widget(0), QLabel): self.tab_widget.removeTab(0)
+        if not is_placeholder and self.tab_widget.count() == 1 and isinstance(self.tab_widget.widget(0), QLabel):
+            self.tab_widget.removeTab(0)
+
         if is_placeholder:
-            placeholder = QLabel("Open a file or create a new one to start.", alignment=Qt.AlignmentFlag.AlignCenter)
-            placeholder.setObjectName("PlaceholderLabel");
-            self.tab_widget.addTab(placeholder, "Welcome")
+            placeholder = QLabel("Open a file...", alignment=Qt.AlignmentFlag.AlignCenter);
+            placeholder.setObjectName("PlaceholderLabel")
+            self.tab_widget.addTab(placeholder, "Welcome");
             self.tab_widget.setTabsClosable(False);
             return
-        self.tab_widget.setTabsClosable(True)
-        editor = EditorWidget(self.completion_manager, self)
-        editor.set_filepath(filepath);
-        editor.set_text(content)
-        editor.cursor_position_display_updated.connect(lambda l, c: self.cursor_label.setText(f" Ln {l}, Col {c} "))
-        editor.content_possibly_changed.connect(partial(self._on_content_changed, editor))
-        if not filepath: self.untitled_file_counter += 1
-        name = os.path.basename(filepath) if filepath else f"Untitled-{self.untitled_file_counter}"
-        index = self.tab_widget.addTab(editor, name)
-        self.tab_widget.setTabToolTip(index, filepath or f"Unsaved {name}")
-        self.editor_tabs_data[editor] = {'filepath': filepath, 'original_hash': hash(content)}
-        self.tab_widget.setCurrentWidget(editor)
-        editor.text_area.setFocus();
-        self._update_window_title()
 
-    def _action_open_file(self, filepath: str, content: str = None):
+        try:
+            self.tab_widget.setTabsClosable(True);
+            editor = EditorWidget(self.completion_manager, self)
+            ext = os.path.splitext(filepath or "")[1].lower()
+            highlighter = self.puffin_api.highlighter_map.get(ext) or (
+                PythonSyntaxHighlighter if ext == '.py' else None)
+            editor.set_highlighter(highlighter);
+            editor.set_filepath(filepath);
+            editor.set_text(content)
+            editor.cursor_position_display_updated.connect(lambda l, c: self.cursor_label.setText(f" Ln {l+1}, Col {c} "))
+            editor.content_possibly_changed.connect(partial(self._on_content_changed, editor))
+            # I'm connecting the new signal from the editor to the status bar here.
+            editor.status_message_requested.connect(self.statusBar().showMessage)
+
+            if filepath:
+                name = os.path.basename(filepath)
+            else:
+                self.untitled_file_counter += 1
+                name = f"Untitled-{self.untitled_file_counter}"
+            index = self.tab_widget.addTab(editor, name);
+            self.tab_widget.setTabToolTip(index, filepath or f"Unsaved {name}")
+            self.editor_tabs_data[editor] = {'filepath': filepath, 'original_hash': hash(content)}
+            self.tab_widget.setCurrentWidget(editor);
+            editor.text_area.setFocus()
+        except Exception as e:
+            log.critical(f"CRASH during _add_new_tab: {e}", exc_info=True)
+            QMessageBox.critical(self, "Fatal Error", f"Could not create editor tab:\n\n{e}")
+
+    def _action_open_file(self, filepath: Optional[str] = None, content: Optional[str] = None):
+        if not (isinstance(filepath, str) and filepath): return
         norm_path = os.path.normpath(filepath)
         for i in range(self.tab_widget.count()):
             widget = self.tab_widget.widget(i)
             if isinstance(widget, EditorWidget) and self.editor_tabs_data.get(widget, {}).get('filepath') == norm_path:
                 self.tab_widget.setCurrentIndex(i);
                 return
+
+        if handler := self.file_open_handlers.get(os.path.splitext(norm_path)[1].lower()):
+            handler(norm_path);
+            self.file_handler._add_to_recent_files(norm_path);
+            return
         if content is None:
             try:
                 with open(norm_path, 'r', encoding='utf-8', errors='replace') as f:
                     content = f.read()
             except Exception as e:
-                QMessageBox.critical(self, "Error Opening File", f"Could not read file: {e}");
-                return
-        self._add_new_tab(norm_path, content)
+                self.puffin_api.show_message("critical", "Error Opening File", f"Could not read file: {e}"); return
+        self._add_new_tab(norm_path, content);
         self.file_handler._add_to_recent_files(norm_path)
 
     def _action_open_file_dialog(self):
@@ -265,22 +295,14 @@ class MainWindow(QMainWindow):
             path = QFileDialog.getExistingDirectory(self, "Open Folder",
                                                     self.project_manager.get_active_project_path() or os.path.expanduser(
                                                         "~"))
-
-        if path:
-            self.project_manager.open_project(path)
-            self._broadcast_project_change()
+        if path: self.project_manager.open_project(path); self.project_manager.projects_changed.emit()
 
     def _action_close_project(self, path: Optional[str] = None):
-        path_to_close = path if isinstance(path, str) else self.project_manager.get_active_project_path()
-        if path_to_close:
-            self.project_manager.close_project(path_to_close)
-            self._broadcast_project_change()
+        if path_to_close := path if isinstance(path, str) else self.project_manager.get_active_project_path():
+            self.project_manager.close_project(path_to_close);
+            self.project_manager.projects_changed.emit()
         else:
             self.statusBar().showMessage("No active project to close.", 2000)
-
-    def _broadcast_project_change(self):
-        for plugin in self.plugin_manager.get_loaded_plugins():
-            if hasattr(plugin.instance, "refresh_project_views"): plugin.instance.refresh_project_views()
 
     def _on_theme_selected(self, theme_id):
         self.settings.set("last_theme_id", theme_id);
@@ -288,19 +310,20 @@ class MainWindow(QMainWindow):
 
     def _on_tab_changed(self, index):
         self._update_window_title()
-        if index != -1 and isinstance(widget := self.tab_widget.widget(index), EditorWidget):
+        widget = self.tab_widget.widget(index) if index != -1 else None
+        if isinstance(widget, EditorWidget):
             line, col = widget.get_cursor_position()
-            self.cursor_label.setText(f" Ln {line}, Col {col + 1} ")
+            self.cursor_label.setText(f" Ln {line + 1}, Col {col + 1} ")
         else:
             self.cursor_label.setText("")
 
-    def _is_editor_modified(self, editor: 'QWidget') -> bool:
+    def _is_editor_modified(self, editor: QWidget) -> bool:
         return isinstance(editor, EditorWidget) and (data := self.editor_tabs_data.get(editor)) and hash(
             editor.get_text()) != data['original_hash']
 
     def _on_content_changed(self, editor: EditorWidget):
-        is_modified = self._is_editor_modified(editor)
-        index = self.tab_widget.indexOf(editor)
+        if not (isinstance(editor, EditorWidget) and self.tab_widget.isAncestorOf(editor)): return
+        is_modified, index = self._is_editor_modified(editor), self.tab_widget.indexOf(editor)
         if index != -1:
             current_text = self.tab_widget.tabText(index)
             has_asterisk = current_text.endswith(' *')
@@ -313,38 +336,34 @@ class MainWindow(QMainWindow):
             self.settings.get("auto_save_delay_seconds", 3) * 1000)
 
     def _update_window_title(self):
-        base_title = "PuffinPyEditor"
-        project_name = os.path.basename(
-            self.project_manager.get_active_project_path()) if self.project_manager.get_active_project_path() else ""
-        current_file = ""
+        base_title, project_name = "PuffinPyEditor", os.path.basename(
+            self.project_manager.get_active_project_path()) if self.project_manager.is_project_open() else ""
+        current_file = "";
         current_widget = self.tab_widget.currentWidget()
         if isinstance(current_widget, EditorWidget):
             filepath = self.editor_tabs_data.get(current_widget, {}).get('filepath')
             current_file = os.path.basename(filepath) if filepath else self.tab_widget.tabText(
                 self.tab_widget.currentIndex()).replace(" *", "")
             if self._is_editor_modified(current_widget): current_file += " *"
-        title = " - ".join(filter(None, [current_file, project_name, base_title]))
-        self.setWindowTitle(title)
+        self.setWindowTitle(" - ".join(filter(None, [current_file, project_name, base_title])))
 
     def _action_save_file(self, editor_widget=None, save_as=False):
         current_editor = editor_widget or self.tab_widget.currentWidget()
         if not isinstance(current_editor, EditorWidget): return None
-        editor_data = self.editor_tabs_data.get(current_editor)
-        if not editor_data: log.error("Could not find data for the current editor tab."); return None
-        content, is_modified = current_editor.get_text(), self._is_editor_modified(current_editor)
-        if not is_modified and not save_as and editor_data['filepath']:
+        if not (editor_data := self.editor_tabs_data.get(current_editor)): return None
+        content = current_editor.get_text()
+        if not self._is_editor_modified(current_editor) and not save_as and editor_data['filepath']:
             self.statusBar().showMessage("File is already saved.", 2000);
             return editor_data['filepath']
         if (filepath := self.file_handler.save_file_content(editor_data['filepath'], content, save_as)):
-            editor_data['filepath'] = filepath;
-            editor_data['original_hash'] = hash(content)
+            editor_data.update({'filepath': filepath, 'original_hash': hash(content)});
             current_editor.set_filepath(filepath)
             if (index := self.tab_widget.indexOf(current_editor)) != -1:
-                self.tab_widget.setTabText(index, os.path.basename(filepath))
+                self.tab_widget.setTabText(index, os.path.basename(filepath));
                 self.tab_widget.setTabToolTip(index, filepath)
             self.statusBar().showMessage(f"File saved: {os.path.basename(filepath)}", 3000)
-            self._on_content_changed(current_editor)
-            self.file_handler._add_to_recent_files(filepath)
+            self._on_content_changed(current_editor);
+            self.file_handler._add_to_recent_files(filepath);
             return filepath
         self.statusBar().showMessage("Save cancelled.", 2000);
         return None
@@ -353,80 +372,71 @@ class MainWindow(QMainWindow):
         self._action_save_file(save_as=True)
 
     def _action_save_all(self):
-        saved_count = sum(1 for i in range(self.tab_widget.count()) if
-                          self._is_editor_modified(w := self.tab_widget.widget(i)) and self._action_save_file(w))
-        if saved_count > 0: self.statusBar().showMessage(f"Saved {saved_count} file(s).", 3000)
+        if count := sum(1 for i in range(self.tab_widget.count()) if
+                        self._is_editor_modified(w := self.tab_widget.widget(i)) and self._action_save_file(w)):
+            self.statusBar().showMessage(f"Saved {count} file(s).", 3000)
 
     def _action_close_tab_by_index(self, index):
-        widget_to_close = self.tab_widget.widget(index)
-        if not isinstance(widget_to_close, EditorWidget):
-            self.tab_widget.removeTab(index)
-            if self.tab_widget.count() == 0: self._add_new_tab(is_placeholder=True)
+        self._close_widget_safely(self.tab_widget.widget(index), QCloseEvent())
+
+    def _close_widget_safely(self, widget, event):
+        if not isinstance(widget, EditorWidget):
+            if widget.parent() is None: widget.deleteLater()
+            event.accept();
             return
-        if self._is_editor_modified(widget_to_close):
-            filename = self.tab_widget.tabText(index).replace(" *", "")
-            ret = QMessageBox.question(self, "Save Changes?", f"Do you want to save the changes to {filename}?",
-                                       QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-                                       QMessageBox.StandardButton.Save)
-            if (ret == QMessageBox.StandardButton.Save and not self._action_save_file(widget_to_close)): return
-            if ret == QMessageBox.StandardButton.Cancel: return
-        self.tab_widget.removeTab(index)
-        if widget_to_close in self.editor_tabs_data: del self.editor_tabs_data[widget_to_close]
-        if self.tab_widget.count() == 0: self._add_new_tab(is_placeholder=True)
+        if self._is_editor_modified(widget):
+            filename = self.tab_widget.tabText(self.tab_widget.indexOf(widget)).replace(" *", "")
+            ret = QMessageBox.question(self, "Save Changes?", f"Save changes to {filename}?",
+                                       QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
+            if ret == QMessageBox.StandardButton.Cancel or (
+                    ret == QMessageBox.StandardButton.Save and not self._action_save_file(widget)):
+                event.ignore();
+                return
+        if widget in self.editor_tabs_data: del self.editor_tabs_data[widget]
+        event.accept()
 
     def _update_recent_files_menu(self):
-        self.recent_files_menu.clear()
+        self.recent_files_menu.clear();
         recent_files = self.settings.get("recent_files", [])
         self.recent_files_menu.setEnabled(bool(recent_files))
         for i, filepath in enumerate(recent_files[:10]):
             action = QAction(f"&{i + 1} {os.path.basename(filepath)}", self)
             action.setData(filepath)
             action.setToolTip(filepath)
-            action.triggered.connect(self._action_open_recent_file);
+            action.triggered.connect(self._action_open_recent_file)
             self.recent_files_menu.addAction(action)
 
     def _action_open_recent_file(self):
-        action = self.sender()
-        if action and (filepath := action.data()):
-            if os.path.exists(filepath):
-                self._action_open_file(filepath)
-            else:
-                QMessageBox.warning(self, "File Not Found", f"The file '{filepath}' could not be found.")
-                recents = self.settings.get("recent_files", [])
-                if filepath in recents: recents.remove(filepath)
-                self.settings.set("recent_files", recents);
-                self._update_recent_files_menu()
+        if action := self.sender(): self._action_open_file(action.data())
 
     def _trigger_file_linter(self):
         pass
 
     def _show_about_dialog(self):
-        QMessageBox.about(self, "About PuffinPyEditor",
-                          f"<b>PuffinPyEditor v{versioning.APP_VERSION}</b><p>A modern, extensible code editor written in Python.</p><p>Copyright © 2024 PuffinPyEditorProject. All rights reserved.</p>")
+        QMessageBox.about(self, "About", f"PuffinPyEditor v{versioning.APP_VERSION}")
 
     def _open_github_link(self):
         QDesktopServices.openUrl(QUrl("https://github.com/Stelliro/PuffinPyEditor"))
 
     def _auto_save_current_tab(self):
-        if self._is_editor_modified(editor := self.tab_widget.currentWidget()):
-            log.info(f"Auto-saving tab: {self.tab_widget.tabText(self.tab_widget.currentIndex())}")
-            self._action_save_file(editor_widget=editor)
+        if self._is_editor_modified(editor := self.tab_widget.currentWidget()): self._action_save_file(
+            editor_widget=editor)
 
     def _on_editor_settings_changed(self):
         for i in range(self.tab_widget.count()):
             if isinstance(widget := self.tab_widget.widget(i), EditorWidget): widget.update_editor_settings()
 
     def _action_open_preferences(self):
-        if self.preferences_dialog is None:
+        if not self.preferences_dialog or not self.preferences_dialog.isVisible():
             self.preferences_dialog = PreferencesDialog(self.git_manager, self.github_manager, self.plugin_manager,
-                                                        self)
+                                                        self.puffin_api, self)
             self.preferences_dialog.settings_changed_for_editor_refresh.connect(self._on_editor_settings_changed)
             self.preferences_dialog.theme_changed_signal.connect(self._on_theme_selected)
         self.preferences_dialog.show();
         self.preferences_dialog.raise_();
         self.preferences_dialog.activateWindow()
 
-    def _goto_definition_result(self, filepath: str, line: int, col: int):
+    def _goto_definition_result(self, filepath, line, col):
         if not filepath: self.statusBar().showMessage("Definition not found", 3000); return
         norm_path = os.path.normpath(filepath)
         for i in range(self.tab_widget.count()):
@@ -441,27 +451,25 @@ class MainWindow(QMainWindow):
                 'filepath') == norm_path:
             e.goto_line_and_column(line, col)
 
-    def _save_state_and_exit(self, event: QCloseEvent):
-        self.settings.set("window_size", [self.size().width(), self.size().height()], False)
-        self.settings.set("window_position", [self.pos().x(), self.pos().y()], False)
-        self.project_manager.save_session()
-        self.settings.save();
-        log.info("Application state saved. Exiting.");
-        event.accept()
+    def _shutdown_managers(self):
+        log.info("Shutting down core managers...")
+        for manager in [self.completion_manager, self.github_manager, self.git_manager, self.linter_manager]:
+            if hasattr(manager, 'shutdown'): manager.shutdown()
 
     def closeEvent(self, event: QCloseEvent):
         if self._is_app_closing: event.accept(); return
         self._is_app_closing = True
-        for i in range(self.tab_widget.count() - 1, -1, -1):
-            if self._is_editor_modified(widget := self.tab_widget.widget(i)):
-                self.tab_widget.setCurrentIndex(i)
-                ret = QMessageBox.question(self, "Save Changes?",
-                                           f"Do you want to save the changes to {self.tab_widget.tabText(i).replace(' *', '')}?",
-                                           QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-                                           QMessageBox.StandardButton.Save)
-                if (ret == QMessageBox.StandardButton.Save and not self._action_save_file(
-                        widget)) or ret == QMessageBox.StandardButton.Cancel:
-                    self._is_app_closing = False;
-                    event.ignore();
-                    return
-        self._save_state_and_exit(event)
+
+        while self.tab_widget.count() > 0:
+            dummy_event = QCloseEvent();
+            self._close_widget_safely(self.tab_widget.widget(0), dummy_event)
+            if not dummy_event.isAccepted(): self._is_app_closing = False; event.ignore(); return
+            if (index := self.tab_widget.indexOf(self.tab_widget.widget(0))) != -1: self.tab_widget.removeTab(index)
+
+        self.settings.set("window_size", [self.size().width(), self.size().height()], False)
+        self.settings.set("window_position", [self.pos().x(), self.pos().y()], False)
+        self.project_manager.save_session();
+        self.settings.save()
+        self._shutdown_managers()
+        log.info("PuffinPyEditor exited cleanly.")
+        event.accept()

@@ -2,6 +2,7 @@
 import os
 from .markdown_editor_widget import MarkdownEditorWidget
 from utils.logger import log
+from app_core.puffin_api import PuffinPluginAPI
 
 
 class MarkdownPlugin:
@@ -10,9 +11,11 @@ class MarkdownPlugin:
     This version uses the file opener hook to handle .md files.
     """
 
-    def __init__(self, main_window):
-        self.main_window = main_window
-        self.api = main_window.puffin_api
+    def __init__(self, puffin_api: PuffinPluginAPI):
+        # The API object is passed in.
+        self.api = puffin_api
+        # We get the actual main window widget from the API.
+        self.main_window = self.api.get_main_window()
 
         # Register this plugin as the handler for .md files
         self.api.register_file_opener('.md', self.open_markdown_file)
@@ -41,6 +44,7 @@ class MarkdownPlugin:
             if is_placeholder:
                 self.main_window.tab_widget.removeTab(0)
 
+        # Now, `self.main_window` is a proper QWidget, so it's a valid parent.
         editor = MarkdownEditorWidget(self.main_window)
         editor.load_file(filepath)
         # Connect editor's signal to the main window's handler
@@ -53,12 +57,13 @@ class MarkdownPlugin:
         self.main_window.tab_widget.setTabsClosable(True)
 
 
-def initialize(main_window):
+def initialize(puffin_api: PuffinPluginAPI):
     """
     Entry point function for PuffinPyEditor to load the plugin.
     """
     try:
-        plugin_instance = MarkdownPlugin(main_window)
+        # Pass the API object to the plugin's constructor
+        plugin_instance = MarkdownPlugin(puffin_api)
         log.info("Markdown Editor Plugin initialized successfully.")
         return plugin_instance
     except Exception as e:

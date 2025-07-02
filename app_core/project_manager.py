@@ -4,14 +4,22 @@ import datetime
 import zipfile
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
+
+# NEW: Import QObject and pyqtSignal for signals
+from PyQt6.QtCore import QObject, pyqtSignal
+
 from .settings_manager import settings_manager
 from utils.logger import log
 
 
-class ProjectManager:
+class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
     """Manages the state of open projects and project-wide operations."""
 
+    # NEW: Add the required signal
+    projects_changed = pyqtSignal()
+
     def __init__(self):
+        super().__init__()  # NEW: Call the QObject constructor
         self._open_projects: List[str] = []
         self._active_project_path: Optional[str] = None
         self._load_session()
@@ -60,6 +68,7 @@ class ProjectManager:
         if norm_path not in self._open_projects:
             self._open_projects.append(norm_path)
             log.info(f"Project opened: {norm_path}")
+            self.projects_changed.emit()  # NEW: Emit signal on change
         self.set_active_project(norm_path)
         return True
 
@@ -69,6 +78,7 @@ class ProjectManager:
         if norm_path in self._open_projects:
             self._open_projects.remove(norm_path)
             log.info(f"Project closed: {norm_path}")
+            self.projects_changed.emit()  # NEW: Emit signal on change
 
             # If the closed project was the active one, pick a new active one
             if self.get_active_project_path() == norm_path:
@@ -133,7 +143,7 @@ class ProjectManager:
             return False
 
     def _generate_file_tree_from_list(
-        self, project_root: str, file_list: List[str]
+            self, project_root: str, file_list: List[str]
     ) -> List[str]:
         """Generates a text-based file tree from a specific list of files."""
         tree = {}
@@ -163,14 +173,47 @@ class ProjectManager:
 
         return build_tree_lines(tree)
 
+    def _clean_git_conflict_markers(self, content: str) -> str:
+        """Removes Git conflict markers from a string, keeping the HEAD version."""
+        if '<<<<<<<' not in content:
+            return content
+
+        lines = content.splitlines()
+        cleaned_lines = []
+        in_conflict = False
+        # We want to keep the HEAD version, which is the part before '======='
+        keep_current_version = False
+
+        for line in lines:
+            if line.startswith('<<<<<<<'):
+                in_conflict = True
+                keep_current_version = True
+                continue
+
+            if line.startswith('======='):
+                if in_conflict:
+                    keep_current_version = False
+                    continue
+
+            if line.startswith('>>>>>>>'):
+                if in_conflict:
+                    in_conflict = False
+                    keep_current_version = False
+                    continue
+
+            if not in_conflict or (in_conflict and keep_current_version):
+                cleaned_lines.append(line)
+
+        return "\n".join(cleaned_lines)
+
     def export_project_for_ai(
-        self,
-        output_filepath: str,
-        selected_files: List[str],
-        instructions: str,
-        guidelines: List[str],
-        golden_rules: List[str],
-        all_problems: Optional[Dict[str, List[Dict]]] = None
+            self,
+            output_filepath: str,
+            selected_files: List[str],
+            instructions: str,
+            guidelines: List[str],
+            golden_rules: List[str],
+            all_problems: Optional[Dict[str, List[Dict]]] = None
     ) -> Tuple[bool, str]:
         """
         Exports selected project files into a single Markdown file for AI.
@@ -196,7 +239,7 @@ class ProjectManager:
 
         output_lines.append("\n## ✨ Golden Rules\n```text")
         golden_rules_text = "\n".join(
-            [f"{i+1}. {g}" for i, g in enumerate(golden_rules)]
+            [f"{i + 1}. {g}" for i, g in enumerate(golden_rules)]
         ) if golden_rules else "No specific golden rules were provided."
         output_lines.append(golden_rules_text)
         output_lines.extend(["```", "---"])
@@ -233,7 +276,11 @@ class ProjectManager:
             output_lines.append(f"```{language}")
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
-                    output_lines.append(f.read())
+                    original_content = f.read()
+                    cleaned_content = self._clean_git_conflict_markers(original_content)
+                    if original_content != cleaned_content:
+                        log.info(f"Cleaned git conflict markers from {filepath} for export.")
+                    output_lines.append(cleaned_content)
                 file_count += 1
             except (IOError, UnicodeDecodeError) as e:
                 log.warning(

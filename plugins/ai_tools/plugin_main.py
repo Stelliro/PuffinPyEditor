@@ -1,10 +1,11 @@
 # PuffinPyEditor/plugins/ai_tools/plugin_main.py
 from .ai_export_dialog import AIExportDialog
+from app_core.puffin_api import PuffinPluginAPI
 
 
 class AIToolsPlugin:
-    def __init__(self, main_window):
-        self.api = main_window.puffin_api
+    def __init__(self, puffin_api: PuffinPluginAPI):
+        self.api = puffin_api
         self.api.add_menu_action(
             menu_name="tools",
             text="Export Project for AI...",
@@ -16,20 +17,13 @@ class AIToolsPlugin:
         project_manager = self.api.get_manager("project")
         project_path = project_manager.get_active_project_path()
         if not project_path:
-            self.api.show_message(
-                "info", "No Project Open",
-                "Please open a project to use the AI Export tool."
-            )
+            self.api.show_message("info", "No Project Open", "Please open a project to use the AI Export tool.")
             return
 
-        dialog = AIExportDialog(
-            project_path,
-            project_manager,
-            self.api.get_manager("linter"),
-            self.api.get_main_window()
-        )
+        linter_manager = self.api.get_manager("linter")
+        dialog = AIExportDialog(project_path, project_manager, linter_manager, self.api.get_main_window())
         dialog.exec()
 
 
-def initialize(main_window):
-    return AIToolsPlugin(main_window)
+def initialize(puffin_api: PuffinPluginAPI):
+    return AIToolsPlugin(puffin_api)

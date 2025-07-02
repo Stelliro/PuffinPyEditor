@@ -1,0 +1,9 @@
+{
+    "id": "rust_tools",
+    "name": "Rust Tools",
+    "author": "PuffinPy Team",
+    "version": "1.0.0",
+    "description": "Adds syntax highlighting support for Rust files (.rs).",
+    "entry_point": "plugin_main.py",
+    "dependencies": {}
+}

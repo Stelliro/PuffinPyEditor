@@ -1,0 +1,8 @@
+{
+    "id": "list_view_explorer",
+    "name": "List View Explorer",
+    "version": "1.0.0",
+    "author": "PuffinPy Team",
+    "description": "A stable, modern file and project explorer using a custom list view.",
+    "entry_point": "plugin_main.py"
+}
