@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, Tuple, List
 from utils.logger import log, get_app_data_path
 from utils.helpers import get_base_path
-from app_core.puffin_api import PuffinPluginAPI # Import API for type hinting
+from app_core.puffin_api import PuffinPluginAPI  # Import API for type hinting
 
 try:
     from packaging.version import Version, InvalidVersion
@@ -20,14 +20,21 @@ except ImportError:
     log.warning(
         "The 'packaging' library is not installed. Version comparison will be basic. Run 'pip install packaging'.")
 
+
     # Define dummy classes if 'packaging' is not available
     class _DummyVersion:
         def __init__(self, v): self.v = v
+
         def __eq__(self, o): return self.v == o.v
+
         def __lt__(self, o): return self.v < o.v
+
         def __le__(self, o): return self.v <= o.v
+
         def __gt__(self, o): return self.v > o.v
+
         def __ge__(self, o): return self.v >= o.v
+
 
     Version = _DummyVersion
     InvalidVersion = ValueError
@@ -39,17 +46,12 @@ class Plugin:
     manifest: Dict[str, Any]
     path: str
     source_type: str  # 'built-in', 'core-tool', 'user'
-    is_core: bool = field(init=False)
+    is_core: bool = False  # MODIFIED: Default to False, will be set by manager
     is_loaded: bool = False
     enabled: bool = True
     module: Optional[Any] = None
     instance: Optional[Any] = None
     status_reason: str = "Not loaded"
-
-    def __post_init__(self):
-        # MODIFIED: A plugin is only "core" if it is in the main `plugins` directory.
-        # This allows debug tools and user plugins to be correctly identified as non-core.
-        self.is_core = self.source_type == "built-in"
 
     @property
     def id(self) -> str: return self.manifest.get('id', 'unknown')
@@ -62,20 +64,19 @@ class Plugin:
 
 
 class PluginManager:
-    # --- FIX: The constructor now takes the main_window and uses its existing API object ---
-    def __init__(self, main_window):
-        # This is the corrected logic.
-        # It ensures a single, shared API instance across the app.
-        self.api: PuffinPluginAPI = main_window.puffin_api
+    # MODIFIED: Removed integrated plugins and renamed python_runner.
+    ESSENTIAL_PLUGIN_IDS = {
+        'python_tools',  # Core script execution and output panel
+    }
 
+    def __init__(self, main_window):
+        self.api: PuffinPluginAPI = main_window.puffin_api
         base_app_path = get_base_path()
         app_data_path = get_app_data_path()
-
         self.built_in_plugins_dir = os.path.join(base_app_path, "plugins")
         self.core_tools_directory = os.path.join(base_app_path, "core_debug_tools")
         self.user_plugins_directory = os.path.join(app_data_path, "plugins")
         self.plugin_states_file = os.path.join(app_data_path, "plugin_states.json")
-
         self._ensure_paths_and_packages()
         self.plugins: Dict[str, Plugin] = {}
         log.info("PluginManager initialized with a shared API.")
@@ -96,7 +97,11 @@ class PluginManager:
     def discover_and_load_plugins(self, ignore_list: Optional[List[str]] = None):
         log.info("Starting full plugin discovery and loading process...")
         ignore_list = ignore_list or []
+        # Clear existing loaded plugins to allow for full reload
+        for plugin in self.get_loaded_plugins():
+            self.unload_plugin(plugin.id)
 
+        self.plugins.clear()  # Clear the dictionary for a fresh discovery
         self._discover_plugins()
         self._load_plugin_states()
         load_order = self._resolve_dependencies()
@@ -134,8 +139,12 @@ class PluginManager:
                 manifest = json.load(f)
             if not self._validate_manifest(manifest, manifest_path): return
             plugin_id = manifest['id']
-            if plugin_id in self.plugins and source_type == "built-in": return
+            if plugin_id in self.plugins: return  # Avoid duplicates
+
             plugin = Plugin(manifest=manifest, path=plugin_path, source_type=source_type)
+            # Set the `is_core` flag based on our explicit list
+            plugin.is_core = plugin.id in self.ESSENTIAL_PLUGIN_IDS
+
             self.plugins[plugin_id] = plugin
         except (json.JSONDecodeError, IOError) as e:
             log.error(f"Failed to read or parse manifest at '{manifest_path}': {e}")
@@ -149,7 +158,21 @@ class PluginManager:
 
     def _resolve_dependencies(self) -> List[str]:
         log.info("Resolving plugin dependencies...")
-        dependencies = {pid: set(p.manifest.get('dependencies', {}).keys()) for pid, p in self.plugins.items()}
+
+        # *** This block is the corrected logic ***
+        dependencies = {}
+        for pid, p in self.plugins.items():
+            deps_field = p.manifest.get('dependencies', [])
+            if isinstance(deps_field, dict):
+                # Handles {"other_plugin": ">=1.0.0"}
+                dependencies[pid] = set(deps_field.keys())
+            elif isinstance(deps_field, list):
+                # Handles ["other_plugin_1", "other_plugin_2"]
+                dependencies[pid] = set(deps_field)
+            else:
+                log.warning(f"Plugin '{p.name}' has an invalid 'dependencies' format. Must be an object or array.")
+                dependencies[pid] = set()
+
         load_order, resolved = [], set()
         while len(load_order) < len(self.plugins):
             ready = {pid for pid, deps in dependencies.items() if pid not in resolved and not deps - resolved}
@@ -161,20 +184,33 @@ class PluginManager:
                         self.plugins[pid].enabled = False
                         self.plugins[pid].status_reason = f"Dependency error: {missing}"
                 break
+
             for plugin_id in sorted(list(ready)):
-                plugin, can_load = self.plugins[plugin_id], True
-                for dep_id, req_ver in plugin.manifest.get('dependencies', {}).items():
-                    if dep_id not in self.plugins: plugin.status_reason = f"Missing dependency: {dep_id}"; can_load = False; break
-                    if not self._check_version(self.plugins[dep_id].version, req_ver):
-                        plugin.status_reason = f"Version conflict for '{dep_id}'. Have {self.plugins[dep_id].version}, need {req_ver}";
-                        can_load = False;
-                        break
+                plugin = self.plugins.get(plugin_id)
+                if not plugin: continue
+
+                can_load = True
+                deps_dict = plugin.manifest.get('dependencies', {})
+                if isinstance(deps_dict, dict):
+                    for dep_id, req_ver in deps_dict.items():
+                        dep_plugin = self.plugins.get(dep_id)
+                        if not dep_plugin or not dep_plugin.enabled:
+                            plugin.status_reason = f"Missing or disabled dependency: {dep_id}"
+                            can_load = False
+                            break
+                        if not self._check_version(dep_plugin.version, req_ver):
+                            plugin.status_reason = f"Version conflict for '{dep_id}'. Have {dep_plugin.version}, need {req_ver}"
+                            can_load = False
+                            break
+
                 if can_load:
-                    plugin.status_reason = "Dependencies met";
+                    plugin.status_reason = "Dependencies met"
                     load_order.append(plugin_id)
                 else:
                     plugin.enabled = False
+
                 resolved.add(plugin_id)
+
         log.info(f"Plugin load order determined: {load_order}")
         return load_order
 
@@ -216,7 +252,6 @@ class PluginManager:
             spec.loader.exec_module(module)
 
             if hasattr(module, 'initialize'):
-                # Pass the single, shared API instance to the plugin
                 arg_to_pass = self.api
                 plugin.instance = module.initialize(arg_to_pass)
                 plugin.module = module
@@ -241,11 +276,21 @@ class PluginManager:
         log.info(f"Unloading plugin: '{plugin.name}'")
         try:
             if hasattr(plugin.instance, 'shutdown'): plugin.instance.shutdown()
-            plugin.is_loaded, plugin.instance, module_name = False, None, plugin.module.__name__
+
+            # Remove the instance and module reference from our tracking
+            plugin.is_loaded = False
+            plugin.instance = None
+            module_name = plugin.module.__name__ if plugin.module else None
             plugin.module = None
-            if module_name in sys.modules: del sys.modules[module_name]
-            import gc;
+
+            # Clean up from sys.modules to allow for a true reload
+            if module_name and module_name in sys.modules:
+                del sys.modules[module_name]
+
+            # Attempt to garbage collect to release resources
+            import gc
             gc.collect()
+
             plugin.status_reason = "Unloaded";
             log.info(f"Successfully unloaded plugin '{plugin.name}'.")
             return True
@@ -277,19 +322,12 @@ class PluginManager:
             log.error(f"Cannot disable non-existent plugin '{plugin_id}'")
             return
 
-        # Unload the plugin first, which calls shutdown()
-        self.unload_plugin(plugin_id)
-        # Mark it as disabled
         plugin.enabled = False
-        # Save the new state
         self._save_plugin_states()
-
-        # Re-evaluate the entire plugin ecosystem for consistency
         log.info(f"Plugin '{plugin.name}' disabled. Re-evaluating all plugins.")
         self.discover_and_load_plugins()
 
     def enable_all(self):
-        """Enables all available plugins."""
         log.info("Enabling all plugins.")
         for plugin in self.plugins.values():
             plugin.enabled = True
@@ -298,31 +336,20 @@ class PluginManager:
         self.discover_and_load_plugins()
 
     def disable_all_non_core(self):
-        """Disables all non-core plugins."""
-        log.info("Disabling all non-core plugins.")
-
-        # Get a list of IDs to prevent issues with iterating over a modified collection
+        log.info("Disabling all non-essential plugins.")
         plugins_to_disable_ids = [p.id for p in self.plugins.values() if not p.is_core]
 
         if not plugins_to_disable_ids:
-            log.info("No non-core plugins to disable.")
+            log.info("No non-essential plugins to disable.")
             return
 
         for plugin_id in plugins_to_disable_ids:
             plugin = self.plugins.get(plugin_id)
             if plugin:
-                # Unload first to call its shutdown() method if it's loaded
-                if plugin.is_loaded:
-                    self.unload_plugin(plugin_id)
-                # Then mark it as disabled
                 plugin.enabled = False
 
-        # Save the new state of all plugins at once
         self._save_plugin_states()
-
-        # Re-discover and load to ensure a consistent state and dependency resolution.
-        # This is consistent with how enable_all() works.
-        log.info(f"Disabled and unloaded {len(plugins_to_disable_ids)} non-core plugins. Re-evaluating all plugins.")
+        log.info(f"Marked {len(plugins_to_disable_ids)} non-essential plugins as disabled. Re-evaluating all plugins.")
         self.discover_and_load_plugins()
 
     def _load_plugin_states(self):
@@ -348,7 +375,6 @@ class PluginManager:
         return list(self.plugins.values())
 
     def get_installed_plugins(self) -> list:
-        # Compatibility wrapper for older calls that expect dicts
         return [p.manifest for p in self.get_all_plugins()]
 
     def get_loaded_plugins(self) -> List[Plugin]:
@@ -389,7 +415,11 @@ class PluginManager:
     def uninstall_plugin(self, plugin_id: str) -> Tuple[bool, str]:
         plugin = self.plugins.get(plugin_id)
         if not plugin: return False, f"Plugin '{plugin_id}' is not installed."
-        if plugin.is_core: return False, "This is a built-in plugin and cannot be uninstalled."
+        # MODIFIED: A plugin can only be uninstalled if it's a 'user' plugin.
+        if plugin.source_type != 'user':
+            return False, "This is a built-in or core tool and cannot be uninstalled."
+
+        # The rest of the logic can proceed
         self.unload_plugin(plugin_id)
         target_path = os.path.join(self.user_plugins_directory, plugin_id)
         if not os.path.isdir(target_path): return False, f"Plugin directory for '{plugin_id}' not found."

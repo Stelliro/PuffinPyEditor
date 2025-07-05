@@ -1,8 +1,0 @@
-{
-    "id": "tab_drag_handler",
-    "name": "Draggable Tabs Handler",
-    "author": "PuffinPy Team",
-    "version": "1.0.0",
-    "description": "Upgrades the main editor tab widget to allow tabs to be dragged out into separate floating windows.",
-    "entry_point": "plugin_main.py"
-}

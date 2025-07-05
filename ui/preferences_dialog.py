@@ -272,17 +272,19 @@ class PreferencesDialog(QDialog):
         self.theme_combo.blockSignals(False)
 
     def connect_theme_editor_button(self):
-        theme_editor_plugin = self.puffin_api.get_plugin_instance('theme_editor')
-        if theme_editor_plugin:
-            if launcher_func := getattr(theme_editor_plugin, 'show_theme_editor_dialog', None):
-                try:
-                    self.edit_themes_button.clicked.disconnect()
-                except TypeError:
-                    pass
-                self.edit_themes_button.clicked.connect(launcher_func)
-            if dialog := getattr(theme_editor_plugin, 'dialog', None):
-                if hasattr(dialog, 'custom_themes_changed'):
-                    dialog.custom_themes_changed.connect(self._repopulate_theme_combo)
+        # This now uses the launcher callback directly from the API, avoiding the race condition.
+        if self.puffin_api.theme_editor_launcher:
+            try:
+                self.edit_themes_button.clicked.disconnect()
+            except TypeError:
+                pass  # It's fine if it wasn't connected yet.
+            self.edit_themes_button.clicked.connect(self.puffin_api.theme_editor_launcher)
+
+            # Connect the theme editor's signal (if the dialog instance exists) to update our theme list.
+            if theme_editor_instance := self.puffin_api.get_plugin_instance('theme_editor'):
+                if dialog := getattr(theme_editor_instance, 'dialog_instance', None):
+                    if hasattr(dialog, 'custom_themes_changed'):
+                        dialog.custom_themes_changed.connect(self._repopulate_theme_combo)
             self.edit_themes_button.show()
         else:
             self.edit_themes_button.hide()
@@ -477,10 +479,9 @@ class PreferencesDialog(QDialog):
         self.manage_plugins_list.itemSelectionChanged.connect(self._on_installed_plugin_selected)
         left_layout.addWidget(self.manage_plugins_list)
 
-        # MODIFICATION: Add Enable/Disable All buttons
         batch_buttons_layout = QHBoxLayout()
         self.enable_all_button = QPushButton("Enable All")
-        self.disable_all_button = QPushButton("Disable All (Non-Core)")
+        self.disable_all_button = QPushButton("Disable Non-Essential")
         self.enable_all_button.clicked.connect(self._enable_all_plugins)
         self.disable_all_button.clicked.connect(self._disable_all_non_core_plugins)
         batch_buttons_layout.addWidget(self.enable_all_button)
@@ -533,7 +534,6 @@ class PreferencesDialog(QDialog):
         repo_group = QGroupBox("Install from Repository");
         repo_layout = QVBoxLayout(repo_group)
 
-        # This widget/layout wrapper fixes the "already has a parent" issue.
         repo_input_widget = QWidget()
         repo_input_layout = QHBoxLayout(repo_input_widget)
         repo_input_layout.setContentsMargins(0, 0, 0, 0)
@@ -563,7 +563,6 @@ class PreferencesDialog(QDialog):
         local_layout.addWidget(self.install_from_url_button);
         local_layout.addWidget(self.install_from_file_button)
         local_layout.addStretch()
-        # This also fixes a layout issue by putting the QHBoxLayout into the main QVBoxLayout correctly
         layout.addWidget(local_group)
         layout.addStretch()
         return tab
@@ -696,7 +695,7 @@ class PreferencesDialog(QDialog):
             self.enable_plugin_checkbox.setChecked(plugin.enabled);
             self.enable_plugin_checkbox.setEnabled(not plugin.is_core)
             self.reload_plugin_button.setEnabled(plugin.is_loaded);
-            self.uninstall_button.setEnabled(not plugin.is_core)
+            self.uninstall_button.setEnabled(plugin.source_type == 'user')
             self.is_loading = False
 
     def _on_plugin_enabled_changed(self, checked):
@@ -718,7 +717,7 @@ class PreferencesDialog(QDialog):
     def _reload_all_plugins(self):
         self.plugin_manager.discover_and_load_plugins();
         self.restart_needed = True
-        self._populate_manage_plugins_list()  # Repopulate list after reloading all
+        self._populate_manage_plugins_list()
 
     def _enable_all_plugins(self):
         reply = QMessageBox.question(self, "Enable All Plugins",
@@ -735,15 +734,14 @@ class PreferencesDialog(QDialog):
             self._on_ui_setting_changed()
 
     def _disable_all_non_core_plugins(self):
-        # MODIFIED: Updated the confirmation dialog text to be more accurate.
-        reply = QMessageBox.question(self, "Disable All Non-Core Plugins",
-                                     "This will disable and unload all non-essential plugins (e.g., user-installed or debug tools).\n"
-                                     "Core editor functionality will not be affected.\n\n"
+        reply = QMessageBox.question(self, "Disable Non-Essential Plugins",
+                                     "This will disable and unload all non-essential plugins (e.g., language support, AI tools, debug tools).\n"
+                                     "Core functionality like the file explorer and search will not be affected.\n\n"
                                      "Continue?",
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                                      QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
-            log.info("User requested to disable all non-core plugins.")
+            log.info("User requested to disable all non-essential plugins.")
             self.plugin_manager.disable_all_non_core()
             self.restart_needed = True
             self._populate_manage_plugins_list()

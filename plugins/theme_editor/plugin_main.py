@@ -13,7 +13,7 @@ class ThemeEditorPlugin:
         # Correctly get the theme_manager via the API
         self.theme_manager = self.api.get_manager("theme")
         self.dialog_instance = None
-        
+
         # This action will be added to the "Tools" menu.
         self.action = self.api.add_menu_action(
             menu_name="tools",
@@ -21,7 +21,7 @@ class ThemeEditorPlugin:
             callback=self.show_theme_editor_dialog,
             icon_name="fa5s.palette"
         )
-        
+
         # Let the core application know how to launch this plugin's main feature.
         # This is used by the Preferences dialog.
         self.api.register_theme_editor_launcher(self.show_theme_editor_dialog)
@@ -30,14 +30,14 @@ class ThemeEditorPlugin:
     def show_theme_editor_dialog(self):
         """Creates and shows the theme editor dialog."""
         # Lazily create the dialog instance to save resources on startup
-        if self.dialog_instance is None:
+        if self.dialog_instance is None or not self.dialog_instance.parent():
             self.dialog_instance = ThemeEditorDialog(self.theme_manager, self.main_window)
             # When a theme is saved/deleted in the dialog, tell the main window to update its menus
             self.dialog_instance.custom_themes_changed.connect(
                 self.main_window._rebuild_theme_menu
             )
         self.dialog_instance.exec()
-    
+
     def shutdown(self):
         """
         A cleanup method called by the plugin manager before unloading.
@@ -51,6 +51,7 @@ class ThemeEditorPlugin:
             self.action.deleteLater()
         if self.dialog_instance:
             self.dialog_instance.deleteLater()
+
 
 def initialize(puffin_api: PuffinPluginAPI):
     """Entry point for the Theme Editor plugin."""

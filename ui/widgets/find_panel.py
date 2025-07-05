@@ -43,7 +43,7 @@ class FindPanel(QFrame):
         self.toggle_button = QToolButton()
         self.toggle_button.setCheckable(True)
         self.toggle_button.setAutoRaise(True)
-        self.toggle_button.setIcon(qta.icon('fa5s.chevron-right'))
+        self.toggle_button.setIcon(qta.icon('mdi.chevron-right'))
         find_layout.addWidget(self.toggle_button)
 
         self.find_input = QLineEdit()
@@ -51,11 +51,11 @@ class FindPanel(QFrame):
         find_layout.addWidget(self.find_input)
 
         self.find_prev_button = self._create_tool_button(
-            'fa5s.arrow-up', "Find Previous (Shift+F3)")
+            'mdi.arrow-up', "Find Previous (Shift+F3)")
         self.find_next_button = self._create_tool_button(
-            'fa5s.arrow-down', "Find Next (F3)")
+            'mdi.arrow-down', "Find Next (F3)")
         self.close_button = self._create_tool_button(
-            'fa5s.times', "Close (Esc)")
+            'mdi.close', "Close (Esc)")
         find_layout.addWidget(self.find_prev_button)
         find_layout.addWidget(self.find_next_button)
         find_layout.addWidget(self.close_button)
@@ -71,9 +71,9 @@ class FindPanel(QFrame):
         self.replace_input = QLineEdit()
         self.replace_input.setPlaceholderText("Replace")
         self.replace_button = self._create_tool_button(
-            'fa5s.exchange-alt', "Replace", text="Replace")
+            'mdi.find-replace', "Replace", text="Replace")
         self.replace_all_button = self._create_tool_button(
-            'fa5s.magic', "Replace All", text="All")
+            'mdi.auto-fix', "Replace All", text="All")
         replace_layout.addWidget(self.replace_input)
         replace_layout.addWidget(self.replace_button)
         replace_layout.addWidget(self.replace_all_button)

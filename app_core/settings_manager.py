@@ -30,10 +30,12 @@ DEFAULT_SETTINGS = {
     "auto_save_delay_seconds": 3,
     "max_recent_files": 15,
     "favorites": [],
+    "open_files": [], # MODIFIED: New setting to remember open files
 
     # --- Project State ---
     "open_projects": [],
     "active_project_path": None,
+    "explorer_expanded_paths": [], # MODIFIED: New setting to remember expanded folders
 
     # --- Integrations & Run ---
     "python_interpreter_path": "",

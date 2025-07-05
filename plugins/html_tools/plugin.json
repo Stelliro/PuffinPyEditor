@@ -1,9 +1,0 @@
-{
-    "id": "html_tools",
-    "name": "HTML Tools",
-    "author": "PuffinPy Team",
-    "version": "1.0.0",
-    "description": "Adds syntax highlighting and a 'View in Browser' action for HTML files.",
-    "entry_point": "plugin_main.py",
-    "dependencies": {}
-}

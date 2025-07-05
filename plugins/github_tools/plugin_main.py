@@ -28,12 +28,18 @@ class GitHubToolsPlugin:
         self.api.log_info("GitHub Tools plugin initialized.")
         self.api.add_menu_action("tools", "Build Project Installer", self._show_build_installer_dialog, icon_name="fa5s.cogs")
 
+        # THE FIX: Connect signals from the Source Control panel to this plugin's handlers.
+        if sc_panel := self._get_sc_panel():
+            sc_panel.create_release_requested.connect(self.show_create_release_dialog)
+            sc_panel.publish_repo_requested.connect(self._publish_repo)
+            sc_panel.link_to_remote_requested.connect(self._link_repo)
+            sc_panel.change_visibility_requested.connect(self._change_visibility)
+            self.api.log_info("GitHub Tools: Connected signals from Source Control Panel.")
+
     def _get_sc_panel(self):
-        # FIX: The plugin manager stores Plugin objects, not dicts.
-        sc_plugin_obj = self.main_window.plugin_manager.plugins.get(
-            'source_control_ui')
-        if sc_plugin_obj and sc_plugin_obj.instance:
-            return sc_plugin_obj.instance.source_control_panel
+        """Correctly retrieves the source control panel from the main window instance."""
+        if hasattr(self.main_window, 'source_control_panel'):
+            return self.main_window.source_control_panel
         return None
 
     def _ensure_git_identity(self, project_path: str) -> bool:

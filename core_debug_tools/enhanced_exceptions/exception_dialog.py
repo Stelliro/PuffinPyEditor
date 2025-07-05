@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QTextEdit, QLabel,
 from PyQt6.QtGui import QFont, QDesktopServices
 from PyQt6.QtCore import QUrl
 from utils.versioning import APP_VERSION
+from utils.logger import log
 
 
 class ExceptionDialog(QDialog):
@@ -56,13 +57,15 @@ class ExceptionDialog(QDialog):
         report_button = self.button_box.addButton(
             "Report on GitHub", QDialogButtonBox.ButtonRole.HelpRole
         )
+        # MODIFIED: Changed button text for clarity
         quit_button = self.button_box.addButton(
-            "Close Application", QDialogButtonBox.ButtonRole.RejectRole
+            "Quit Application", QDialogButtonBox.ButtonRole.DestructiveRole
         )
 
         copy_button.clicked.connect(self._copy_to_clipboard)
         report_button.clicked.connect(self._open_github_issues)
-        quit_button.clicked.connect(self.reject)
+        # THE FIX: Connect to the application's quit method for a hard exit.
+        quit_button.clicked.connect(self._force_quit_app)
 
         layout.addWidget(self.button_box)
 
@@ -74,8 +77,6 @@ class ExceptionDialog(QDialog):
     def _open_github_issues(self):
         """Opens a new issue on GitHub with pre-filled information."""
         issue_title = quote_plus(f"Crash Report: {self.exception_type}")
-
-        # The multi-line string's content should not have leading space
         issue_body_template = """
 **Describe the bug**
 A clear and concise description of what the bug is. What were you doing when the crash occurred?
@@ -90,7 +91,15 @@ Steps to reproduce the behavior:
 
 ---
 <details>
-"""
+<summary>Click to expand</summary>
+
+```
+{traceback}
+```
+
+</details>
+""".format(traceback=self.full_report_display)
+
         issue_body = quote_plus(issue_body_template.strip())
 
         url = QUrl(
@@ -98,3 +107,8 @@ Steps to reproduce the behavior:
             f"{issue_title}&body={issue_body}"
         )
         QDesktopServices.openUrl(url)
+
+    def _force_quit_app(self):
+        """A failsafe to ensure the application quits immediately."""
+        log.warning("Force quit initiated from exception dialog.")
+        QApplication.instance().quit()

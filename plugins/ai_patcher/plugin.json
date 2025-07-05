@@ -1,0 +1,11 @@
+{
+    "id": "ai_patcher",
+    "name": "AI Patcher",
+    "author": "AI Assistant",
+    "version": "1.0.0",
+    "description": "Generates patch prompts based on a context file (e.g., a changelog) and applies markdown-formatted code updates from an LLM back to the project.",
+    "entry_point": "plugin_main.py",
+    "dependencies": {
+        "script_runner": ">=1.1.1"
+    }
+}

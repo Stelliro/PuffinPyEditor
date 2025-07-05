@@ -2,9 +2,11 @@
 from PyQt6.QtCore import Qt
 from utils.logger import log
 from .terminal_widget import TerminalWidget
+from app_core.puffin_api import PuffinPluginAPI
+
 
 class TerminalPlugin:
-    def __init__(self, puffin_api):
+    def __init__(self, puffin_api: PuffinPluginAPI):
         self.api = puffin_api
         self.terminal_widget = None
 
@@ -13,34 +15,34 @@ class TerminalPlugin:
 
     def _setup_ui(self):
         """Creates and registers the terminal panel and menu action."""
-        # Create an instance of our terminal widget
         self.terminal_widget = TerminalWidget(self.api)
-        
-        # Register it as a dockable panel at the bottom of the window
-        dock = self.api.register_dock_panel(
-            self.terminal_widget, 
-            "Terminal", 
-            Qt.DockWidgetArea.BottomDockWidgetArea, 
-            "fa5s.terminal"
+
+        dock = self.api.add_dock_panel(
+            area_str="bottom",
+            widget=self.terminal_widget,
+            title="Terminal",
+            icon_name="mdi.console"
         )
-        
-        # Add a menu item to the "View" menu to toggle the terminal's visibility
+
         if dock:
             self.api.add_menu_action(
                 menu_name="view",
                 text="Terminal",
                 callback=dock.toggleViewAction().trigger,
-                icon_name="fa5s.terminal"
+                icon_name="mdi.console"
             )
 
     def shutdown(self):
-        """Called by the plugin manager to clean up resources."""
+        """
+        Called by the plugin manager or main window to ensure the terminal's
+        underlying shell process is terminated correctly.
+        """
         if self.terminal_widget:
             self.terminal_widget.stop_process()
-        log.info("Integrated Terminal plugin shut down.")
+            log.info("Terminal process stopped on shutdown request.")
 
 
-def initialize(puffin_api):
+def initialize(puffin_api: PuffinPluginAPI):
     """Entry point for PuffinPyEditor to load the plugin."""
     try:
         return TerminalPlugin(puffin_api)

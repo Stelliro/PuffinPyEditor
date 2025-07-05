@@ -62,11 +62,11 @@ class ThemeEditorDialog(QDialog):
         # MODIFIED: Added missing color keys to the group definitions for a complete UI
         self.COLOR_GROUPS = {
             "Window & General": ["window.background", "sidebar.background", "accent"],
-            "Editor": ["editor.background", "editor.foreground",
+            "Editor": ["editor.background", "editor.foreground", "editor.userHighlightBackground",
                        "editor.lineHighlightBackground", "editor.selectionBackground"],
             "Editor Gutter": ["editorGutter.background",
                               "editorGutter.foreground", "editorLineNumber.foreground",
-                              "editorLineNumber.activeForeground", "editor.breakpoint.color"],
+                              "editorLineNumber.activeForeground"],
             "Editor Matching": ["editor.matchingBracketBackground",
                                 "editor.matchingBracketForeground"],
             "Controls": ["button.background", "button.foreground",
@@ -82,6 +82,14 @@ class ThemeEditorDialog(QDialog):
                 "syntax.decorator", "syntax.self", "syntax.className",
                 "syntax.functionName", "syntax.comment", "syntax.string",
                 "syntax.docstring", "syntax.number"
+            ],
+            "Git Status": [
+                "git.added", "git.modified", "git.deleted",
+                "git.status.foreground"
+            ],
+            "Tree View": [
+                "tree.indentationGuides.stroke", "tree.trace.color",
+                "tree.trace.shadow", "tree.node.color", "tree.node.fill"
             ]
         }
         self.current_theme_id = None

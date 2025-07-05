@@ -9,6 +9,7 @@ from PyQt6.QtCore import QProcess, Qt
 import qtawesome as qta
 from utils.logger import log
 
+
 class TerminalWidget(QWidget):
     """An interactive terminal widget that runs a native shell process."""
 
@@ -38,10 +39,10 @@ class TerminalWidget(QWidget):
         toolbar.setObjectName("TerminalToolbar")
         toolbar_layout = QHBoxLayout(toolbar)
         toolbar_layout.setContentsMargins(5, 2, 5, 2)
-        
+
         self.clear_button = QPushButton(qta.icon('fa5s.broom'), "Clear")
         self.stop_button = QPushButton(qta.icon('fa5s.stop-circle'), "Stop Process")
-        
+
         toolbar_layout.addWidget(self.clear_button)
         toolbar_layout.addWidget(self.stop_button)
         toolbar_layout.addStretch()
@@ -52,13 +53,13 @@ class TerminalWidget(QWidget):
         self.output_area.setAcceptRichText(False)
         self.output_area.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         main_layout.addWidget(self.output_area)
-        
+
     def _connect_signals(self):
         """Connects signals for the process and UI."""
         self.process.readyReadStandardOutput.connect(self._handle_stdout)
         self.process.readyReadStandardError.connect(self._handle_stderr)
         self.process.finished.connect(self._on_process_finished)
-        
+
         self.clear_button.clicked.connect(self.clear_terminal)
         self.stop_button.clicked.connect(self.stop_process)
         self.output_area.customContextMenuRequested.connect(self._show_context_menu)
@@ -70,13 +71,13 @@ class TerminalWidget(QWidget):
         """Applies colors and fonts from the current theme."""
         font = QFont(self.settings.get("font_family"), self.settings.get("font_size"))
         self.output_area.setFont(font)
-        
+
         colors = self.theme_manager.current_theme_data.get('colors', {})
         bg = colors.get('editor.background', '#1E1E1E')
         fg = colors.get('editor.foreground', '#D4D4D4')
         toolbar_bg = colors.get('sidebar.background', '#252526')
         border = colors.get('input.border', '#3c3c3c')
-        
+
         self.setStyleSheet(f"""
             TerminalWidget {{ background-color: {bg}; }}
             #TerminalToolbar {{ 
@@ -98,11 +99,11 @@ class TerminalWidget(QWidget):
 
         project_path = self.project_manager.get_active_project_path()
         start_dir = project_path if project_path and os.path.isdir(project_path) else os.path.expanduser("~")
-        
+
         shell_cmd, args = "", []
         if platform.system() == "Windows":
             shell_cmd = "cmd.exe"
-            args = ["/K", "prompt $g"] # Keep open, set prompt to ">"
+            args = ["/K", "prompt $g"]  # Keep open, set prompt to ">"
         else:
             shell_cmd = os.environ.get("SHELL", "/bin/bash")
 
@@ -110,19 +111,19 @@ class TerminalWidget(QWidget):
         self.process.start(shell_cmd, args)
         log.info(f"Terminal started in '{start_dir}' with shell '{shell_cmd}'.")
         self.output_area.setFocus()
-    
+
     def keyPressEvent(self, event):
         """Handles user input, sending it to the shell process."""
         cursor = self.output_area.textCursor()
-        
+
         # Stop user from deleting the prompt or previous output
         if cursor.position() < self.input_start_position:
             cursor.setPosition(self.input_start_position)
             self.output_area.setTextCursor(cursor)
-        
+
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             command = self.output_area.toPlainText()[self.input_start_position:]
-            QTextEdit.keyPressEvent(self.output_area, event) # Let the editor handle the newline
+            QTextEdit.keyPressEvent(self.output_area, event)  # Let the editor handle the newline
             self.process.write((command + "\n").encode())
             return
 
@@ -134,9 +135,9 @@ class TerminalWidget(QWidget):
 
         # Ctrl+C to stop current process in shell
         if event.key() == Qt.Key.Key_C and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            self.process.write(b'\x03') # Send SIGINT
+            self.process.write(b'\x03')  # Send SIGINT
             return
-            
+
         QTextEdit.keyPressEvent(self.output_area, event)
 
     def _append_text(self, text, color=None):
@@ -165,7 +166,7 @@ class TerminalWidget(QWidget):
     def _on_process_finished(self):
         self._append_text("\n[Process finished. Relaunching shell...]\n")
         self.start_shell()
-        
+
     def _show_context_menu(self, pos):
         """Displays a custom context menu."""
         menu = QMenu()
@@ -176,7 +177,7 @@ class TerminalWidget(QWidget):
         menu.addSeparator()
         menu.addAction(qta.icon('fa5s.file-export'), "Export Session...", self.export_to_file)
         menu.exec(self.output_area.mapToGlobal(pos))
-        
+
     def copy_all(self):
         QApplication.clipboard().setText(self.output_area.toPlainText())
 
@@ -194,15 +195,30 @@ class TerminalWidget(QWidget):
         self.output_area.clear()
         # On Windows, sending a 'cls' command is a clean way to clear
         if platform.system() == "Windows":
-             self.process.write(b'cls\n')
-        else: # For other systems, just restart the shell for a clean slate
+            self.process.write(b'cls\n')
+        else:  # For other systems, just restart the shell for a clean slate
             self.stop_process()
             self.start_shell()
-            
+
     def stop_process(self):
-        if self.process.state() == QProcess.ProcessState.Running:
+        if self.process and self.process.state() != QProcess.ProcessState.NotRunning:
+            log.info("Stopping terminal process...")
+            # Disconnect all signals to prevent dangling calls during shutdown
+            try:
+                self.process.readyReadStandardOutput.disconnect()
+                self.process.readyReadStandardError.disconnect()
+                self.process.finished.disconnect()
+                if hasattr(self.process, 'errorOccurred'):
+                    self.process.errorOccurred.disconnect()
+            except TypeError:
+                pass  # Signals might have already been disconnected
+
+            # Forcefully terminate the process
             self.process.kill()
-            log.info("Terminal process killed by user.")
+
+            # Wait for it to finish to avoid the "Destroyed while running" warning
+            if not self.process.waitForFinished(2000):
+                log.warning("Terminal process did not terminate within 2 seconds of being killed.")
 
     def closeEvent(self, event):
         """Ensure the shell process is terminated when the widget closes."""

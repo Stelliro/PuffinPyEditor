@@ -20,7 +20,6 @@ DEFAULT_CUSTOM_THEMES_FILE_PATH = os.path.join(APP_BASE_PATH, "assets", "themes"
 ICON_COLORS_FILE_PATH = os.path.join(APP_DATA_ROOT, "icon_colors.json")
 DEFAULT_ICON_COLORS_FILE_PATH = os.path.join(APP_BASE_PATH, "assets", "themes", "icon_colors.json")
 
-# --- MODIFICATION: Added missing color keys to both built-in themes ---
 BUILT_IN_THEMES = {
     "puffin_dark": {
         "name": "Puffin Dark", "author": "PuffinPy", "type": "dark", "is_custom": False,
@@ -28,9 +27,13 @@ BUILT_IN_THEMES = {
             "window.background": "#2f383e", "sidebar.background": "#2a3338", "editor.background": "#272e33",
             "editor.foreground": "#d3c6aa", "editor.selectionBackground": "#264f78",
             "editor.lineHighlightBackground": "#3a4145", "editor.matchingBracketBackground": "#545e62",
-            "editor.matchingBracketForeground": "#d3c6aa", "editor.breakpoint.color": "#dc143c",
+            "editor.matchingBracketForeground": "#d3c6aa",
+            "editor.userHighlightBackground": "#83c0924D",
+            "editor.breakpoint.color": "#dc143c",
             "editorGutter.background": "#2f383e", "editorGutter.foreground": "#5f6c6d",
+            "editorGutter.hoverBackground": "#83c0921a",
             "editorLineNumber.foreground": "#5f6c6d", "editorLineNumber.activeForeground": "#d3c6aa",
+            "gutter.activeLineNumberForeground": "#d3c6aa",
             "menu.background": "#3a4145", "menu.foreground": "#d3c6aa", "statusbar.background": "#282f34",
             "statusbar.foreground": "#d3c6aa", "tab.activeBackground": "#272e33",
             "tab.inactiveBackground": "#2f383e", "tab.activeForeground": "#d3c6aa",
@@ -43,6 +46,7 @@ BUILT_IN_THEMES = {
             "syntax.className": "#dbbc7f", "syntax.functionName": "#83c092", "syntax.comment": "#5f6c6d",
             "syntax.string": "#a7c080", "syntax.docstring": "#5f6c6d", "syntax.number": "#d699b6",
             "tree.indentationGuides.stroke": "#5f6c6d", "tree.trace.color": "#83c092",
+            "git.added": "#a7c080", "git.modified": "#dbbc7f", "git.deleted": "#e67e80",
             "git.status.foreground": "#87ceeb"
         }
     },
@@ -52,9 +56,13 @@ BUILT_IN_THEMES = {
             "window.background": "#f5f5f5", "sidebar.background": "#ECECEC", "editor.background": "#ffffff",
             "editor.foreground": "#000000", "editor.selectionBackground": "#add6ff",
             "editor.lineHighlightBackground": "#e0e8f0", "editor.matchingBracketBackground": "#c0c8d0",
-            "editor.matchingBracketForeground": "#000000", "editor.breakpoint.color": "#ff0000",
+            "editor.matchingBracketForeground": "#000000",
+            "editor.userHighlightBackground": "#007acc4D",
+            "editor.breakpoint.color": "#ff0000",
             "editorGutter.background": "#f5f5f5", "editorGutter.foreground": "#505050",
+            "editorGutter.hoverBackground": "#007acc1a",
             "editorLineNumber.foreground": "#9e9e9e", "editorLineNumber.activeForeground": "#000000",
+            "gutter.activeLineNumberForeground": "#000000",
             "menu.background": "#e0e0e0", "menu.foreground": "#000000", "statusbar.background": "#007acc",
             "statusbar.foreground": "#ffffff", "tab.activeBackground": "#ffffff",
             "tab.inactiveBackground": "#f5f5f5", "tab.activeForeground": "#000000",
@@ -67,6 +75,7 @@ BUILT_IN_THEMES = {
             "syntax.className": "#267f99", "syntax.functionName": "#795e26", "syntax.comment": "#008000",
             "syntax.string": "#a31515", "syntax.docstring": "#a31515", "syntax.number": "#098658",
             "tree.indentationGuides.stroke": "#D0D0D0", "tree.trace.color": "#007ACC",
+            "git.added": "#28a745", "git.modified": "#f1e05a", "git.deleted": "#d73a49",
             "git.status.foreground": "#007ACC"
         }
     }
@@ -148,10 +157,10 @@ class ThemeManager:
         if theme_id not in self.all_themes_data: theme_id = "puffin_dark"
         self.current_theme_id = theme_id
         self.current_theme_data = self.all_themes_data.get(theme_id, {})
-        
+
         if 'colors' not in self.current_theme_data:
             log.warning(f"Theme '{theme_id}' is missing the 'colors' dictionary. UI may not render correctly.")
-        
+
         if 'colors' in self.current_theme_data:
             self.current_theme_data['colors']['icon.colors'] = self.icon_colors
 
@@ -163,9 +172,16 @@ class ThemeManager:
         if not app or not self.current_theme_data: return
         colors = self.current_theme_data.get("colors", {})
 
-        def c(key: str, fb: str) -> str: return colors.get(key, fb)
+        def c(key: str, fb: str) -> str:
+            return colors.get(key, fb)
 
-        def adj(h: str, f: int) -> str: c = QColor(h);return c.lighter(f).name() if f > 100 else c.darker(f).name()
+        def adj(h: str, f: int) -> str:
+            c = QColor(h)
+            # Use lighter for light themes and darker for dark themes if factor > 100
+            # A bit of a simplification, but good enough.
+            if self.current_theme_data.get('type', 'dark') == 'light':
+                return c.darker(f).name() if f > 100 else c.lighter(f).name()
+            return c.lighter(f).name() if f > 100 else c.darker(f).name()
 
         ac, wb, bb, bf = c('accent', '#83c092'), c('window.background', '#2f383e'), c('button.background',
                                                                                       '#424d53'), c('button.foreground',
@@ -173,8 +189,14 @@ class ThemeManager:
         ib, igf, ibd, sb = c('input.background', '#3a4145'), c('input.foreground', '#d3c6aa'), c('input.border',
                                                                                                  '#5f6c6d'), c(
             'sidebar.background', '#2a3338')
-        ca, su, sd = get_arrow_svg_uri('down', igf), get_arrow_svg_uri('up', igf), get_arrow_svg_uri('down', igf)
-        ss = f"""QWidget{{background-color:{wb};color:{igf};border:none;}}QMainWindow,QDialog{{background-color:{wb};}}QPushButton{{background-color:{bb};color:{bf};border:1px solid {ibd};border-radius:4px;padding:6px 12px;min-width:80px;}}QPushButton:hover{{background-color:{adj(bb, 115)};border-color:{ac};}}QPushButton:pressed{{background-color:{adj(bb, 95)};}}QPushButton:disabled{{background-color:{adj(bb, 105)};color:{c('editorGutter.foreground', '#888')};border-color:{adj(ibd, 110)};}}QSplitter::handle{{background-color:{sb};width:1px;image:none;}}QSplitter::handle:hover{{background-color:{ac};}}QMenuBar{{background-color:{adj(wb, 105)};border-bottom:1px solid {ibd};}}QMenuBar::item{{padding:6px 12px;}}QMenuBar::item:selected{{background-color:{ac};color:{c('button.foreground', '#000')};}}QMenu{{background-color:{c('menu.background', '#3a4145')};border:1px solid {ibd};padding:4px;}}QMenu::item{{padding:6px 24px;}}QMenu::item:selected{{background-color:{ac};color:{c('button.foreground', '#000')};}}QTabWidget::pane{{border:none;}}QTabBar::tab{{background:transparent;color:{c('tab.inactiveForeground', '#5f6c6d')};padding:8px 15px;border:none;border-bottom:2px solid transparent;}}QTabBar::tab:hover{{background:{adj(wb, 110)};}}QTabBar::tab:selected{{color:{c('tab.activeForeground', '#d3c6aa')};border-bottom:2px solid {ac};}}QToolButton{{background:transparent;border:none;border-radius:4px;padding:4px;}}QToolButton:hover{{background-color:{adj(bb, 120)};}}QAbstractItemView{{background-color:{sb};outline:0;}}QTreeView,QListWidget,QTableWidget,QTreeWidget{{alternate-background-color:{adj(sb, 103)};}}QTreeView::item:hover,QListWidget::item:hover{{background-color:{adj(sb, 120)};}}QTreeView::item:selected,QListWidget::item:selected{{background-color:{ac};color:{c('button.foreground', '#000')};}}QHeaderView::section{{background-color:{adj(sb, 110)};padding:4px;border:1px solid {wb};}}QDockWidget::title{{background-color:{adj(wb, 105)};text-align:left;padding:5px;border-bottom:1px solid {ibd};}}QGroupBox{{font-weight:bold;border:1px solid {ibd};border-radius:4px;margin-top:10px;}}QGroupBox::title{{subcontrol-origin:margin;subcontrol-position:top left;padding:0 5px 0 5px;left:10px;background-color:{wb};}}QLineEdit,QTextEdit,QPlainTextEdit,QAbstractSpinBox,QComboBox{{background-color:{ib};border:1px solid {ibd};border-radius:4px;padding:5px;}}QLineEdit:focus,QAbstractSpinBox:focus,QComboBox:focus,QTextEdit:focus,QPlainTextEdit:focus{{border:1px solid {ac};}}QComboBox::drop-down{{subcontrol-origin:padding;subcontrol-position:top right;width:20px;border-left:1px solid {ibd};}}QComboBox::down-arrow{{image:url({ca});width:8px;height:8px;}}QSpinBox{{padding-right:22px;}}QSpinBox::up-button,QSpinBox::down-button{{subcontrol-origin:border;width:22px;background-color:transparent;border-left:1px solid {ibd};}}QSpinBox::up-button:hover,QSpinBox::down-button:hover{{background-color:{adj(ib, 120)};}}QSpinBox::up-button{{subcontrol-position:top right;}}QSpinBox::down-button{{subcontrol-position:bottom right;}}QSpinBox::up-arrow{{image:url({su});width:8px;height:8px;}}QSpinBox::down-arrow{{image:url({sd});width:8px;height:8px;}}QStatusBar{{background-color:{c('statusbar.background', '#282f34')};border-top:1px solid {ibd};color:{c('statusbar.foreground', '#d3c6aa')};}}QScrollBar:vertical{{width:10px;}}QScrollBar:horizontal{{height:10px;}}QScrollBar::handle{{background:{c('scrollbar.handle', '#424d53')};border-radius:5px;min-height:20px;}}QScrollBar::handle:hover{{background:{c('scrollbar.handleHover', '#545e62')};}}QScrollBar::add-line,QScrollBar::sub-line{{height:0px;width:0px;}}QScrollBar::add-page,QScrollBar::sub-page{{background:none;}}"""
+
+        # *** THIS IS THE CORRECTED LINE ***
+        # Use the accent color 'ac' for the arrows to ensure they are always themed correctly.
+        arrow_color = c('editor.foreground', '#d3c6aa')  # Use a high-contrast color for arrows
+        ca, su, sd = get_arrow_svg_uri('down', arrow_color), get_arrow_svg_uri('up', arrow_color), get_arrow_svg_uri(
+            'down', arrow_color)
+
+        ss = f"""QWidget{{background-color:{wb};color:{igf};border:none;}}QMainWindow,QDialog{{background-color:{wb};}}QPushButton{{background-color:{bb};color:{bf};border:1px solid {ibd};border-radius:4px;padding:6px 12px;min-width:80px;}}QPushButton:hover{{background-color:{adj(bb, 115)};border-color:{ac};}}QPushButton:pressed{{background-color:{adj(bb, 95)};}}QPushButton:disabled{{background-color:{adj(bb, 105)};color:{c('editorGutter.foreground', '#888')};border-color:{adj(ibd, 110)};}}QSplitter::handle{{background-color:{sb};width:1px;image:none;}}QSplitter::handle:hover{{background-color:{ac};}}QMenuBar{{background-color:{adj(wb, 105)};border-bottom:1px solid {ibd};}}QMenuBar::item{{padding:6px 12px;}}QMenuBar::item:selected{{background-color:{ac};color:{c('button.foreground', '#000')};}}QMenu{{background-color:{c('menu.background', '#3a4145')};border:1px solid {ibd};padding:4px;}}QMenu::item{{padding:6px 24px;}}QMenu::item:selected{{background-color:{ac};color:{c('button.foreground', '#000')};}}QTabWidget::pane{{border:none;}}QTabBar::tab{{background:transparent;color:{c('tab.inactiveForeground', '#5f6c6d')};padding:8px 15px;border:none;border-bottom:2px solid transparent;}}QTabBar::tab:hover{{background:{adj(wb, 110)};}}QTabBar::tab:selected{{color:{c('tab.activeForeground', '#d3c6aa')};border-bottom:2px solid {ac};}}QToolButton{{background:transparent;border:none;border-radius:4px;padding:4px;}}QToolButton:hover{{background-color:{adj(bb, 120)};}}QAbstractItemView{{background-color:{sb};outline:0;}}QTreeView,QListWidget,QTableWidget,QTreeWidget{{alternate-background-color:{adj(sb, 103)};}}QTreeView::item:hover,QListWidget::item:hover{{background-color:{adj(sb, 120)};}}QTreeView::item:selected,QListWidget::item:selected{{background-color:{ac};color:{c('button.foreground', '#000')};}}QHeaderView::section{{background-color:{adj(sb, 110)};padding:4px;border:1px solid {wb};}}QDockWidget::title{{background-color:{adj(wb, 105)};text-align:left;padding:5px;border-bottom:1px solid {ibd};}}QGroupBox{{font-weight:bold;border:1px solid {adj(ibd, 115)};border-radius:6px;margin-top:1em;}}QGroupBox::title{{subcontrol-origin:margin;left:10px;padding:0 4px;color:{ac};background-color:{wb};}}QLineEdit,QTextEdit,QPlainTextEdit,QAbstractSpinBox,QComboBox{{background-color:{ib};border:1px solid {ibd};border-radius:4px;padding:5px;}}QLineEdit:focus,QAbstractSpinBox:focus,QComboBox:focus,QTextEdit:focus,QPlainTextEdit:focus{{border:1px solid {ac};}}QComboBox::drop-down{{subcontrol-origin:padding;subcontrol-position:top right;width:20px;border-left:1px solid {ibd};}}QComboBox::down-arrow{{image:url({ca});width:8px;height:8px;}}QSpinBox{{padding-right:22px;}}QSpinBox::up-button,QSpinBox::down-button{{subcontrol-origin:border;width:22px;background-color:transparent;border-left:1px solid {ibd};}}QSpinBox::up-button:hover,QSpinBox::down-button:hover{{background-color:{adj(ib, 120)};}}QSpinBox::up-button{{subcontrol-position:top right;}}QSpinBox::down-button{{subcontrol-position:bottom right;}}QSpinBox::up-arrow{{image:url({su});width:8px;height:8px;}}QSpinBox::down-arrow{{image:url({sd});width:8px;height:8px;}}QStatusBar{{background-color:{c('statusbar.background', '#282f34')};border-top:1px solid {ibd};color:{c('statusbar.foreground', '#d3c6aa')};}}QScrollBar:vertical{{width:10px;}}QScrollBar:horizontal{{height:10px;}}QScrollBar::handle{{background:{c('scrollbar.handle', '#424d53')};border-radius:5px;min-height:20px;}}QScrollBar::handle:hover{{background:{c('scrollbar.handleHover', '#545e62')};}}QScrollBar::add-line,QScrollBar::sub-line{{height:0px;width:0px;}}QScrollBar::add-page,QScrollBar::sub-page{{background:none;}}"""
         app.setStyleSheet(ss)
 
 

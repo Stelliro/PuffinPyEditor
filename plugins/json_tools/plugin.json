@@ -1,8 +1,0 @@
-{
-    "id": "json_tools",
-    "name": "JSON Tools",
-    "author": "PuffinPy Team",
-    "version": "1.0.0",
-    "description": "Adds syntax highlighting for JSON files.",
-    "entry_point": "plugin_main.py"
-}

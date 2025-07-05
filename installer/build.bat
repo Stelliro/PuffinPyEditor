@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 
 echo.
 echo  ================================================
-echo     PuffinPyEditor Build Script (v12 - Assets Fix)
+echo     PuffinPyEditor Build Script (v13 - Asset Consolidation)
 echo  ================================================
 echo.
 
@@ -101,14 +101,12 @@ echo.
 
 REM --- Step 6: Create Installer ---
 echo [6/6] Generating assets and compiling installer...
-call python "installer\create_icon.py"
-if errorlevel 1 exit /b 1
-
-call python "installer\create_welcome_image.py"
-if errorlevel 1 exit /b 1
-
-call python "installer\create_header_image.py"
-if errorlevel 1 exit /b 1
+REM MODIFIED: Call a single script to generate all assets
+call python "installer\create_installer_assets.py"
+if errorlevel 1 (
+	echo [FATAL ERROR] Failed to generate installer assets.
+	exit /b 1
+)
 echo   - Installer assets generated.
 
 set "MAKENSIS_CMD="
