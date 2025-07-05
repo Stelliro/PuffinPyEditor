@@ -105,15 +105,12 @@ class GitWorker(QObject):
             )
             self.error_occurred.emit(err_msg)
 
-    def commit_files(self, repo_path: str, message: str):
+    def commit_files(self, repo_path: str, message: str, author: git.Actor):
         try:
             repo = Repo(repo_path)
-            author = self._get_author(repo)
-            if not author:
-                return
-
             repo.git.add(A=True)
             if repo.is_dirty(untracked_files=True):
+                # The committer is now passed in directly.
                 repo.index.commit(message, author=author, committer=author)
                 self.operation_success.emit(
                     "Changes committed", {'repo_path': repo_path}
@@ -327,7 +324,7 @@ class SourceControlManager(QObject):
 
     _request_summaries = pyqtSignal(list)
     _request_status = pyqtSignal(str)
-    _request_commit = pyqtSignal(str, str)
+    _request_commit = pyqtSignal(str, str, object)
     _request_push = pyqtSignal(str, str)
     _request_pull = pyqtSignal(str)
     _request_clone = pyqtSignal(str, str, object)
@@ -405,8 +402,8 @@ class SourceControlManager(QObject):
     def get_status(self, path: str):
         self._request_status.emit(path)
 
-    def commit_files(self, path: str, msg: str):
-        self._request_commit.emit(path, msg)
+    def commit_files(self, path: str, msg: str, author: git.Actor):
+        self._request_commit.emit(path, msg, author)
 
     def push(self, path: str):
         self._request_push.emit(path, None)

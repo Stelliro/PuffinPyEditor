@@ -1,7 +1,7 @@
 # PuffinPyEditor/ui/widgets/source_control_panel.py
 import os
 from typing import List, Dict, Optional
-from git import Repo, InvalidGitRepositoryError
+from git import Repo, InvalidGitRepositoryError, Actor
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTreeWidget,
                              QTreeWidgetItem, QMenu, QMessageBox, QLabel, QHeaderView, QLineEdit)
 from PyQt6.QtGui import QColor
@@ -142,10 +142,21 @@ class ProjectSourceControlPanel(QWidget):
 
         gh_tools = self.api.get_plugin_instance("github_tools")
         if not gh_tools or not gh_tools.ensure_git_identity(path):
+            return  # The ensure_git_identity method will show its own error message.
+
+        # Now that we know the identity is correct, we can get the Actor and commit.
+        try:
+            repo = Repo(path)
+            with repo.config_reader() as cr:
+                name = cr.get_value('user', 'name')
+                email = cr.get_value('user', 'email')
+            author = Actor(name, email)
+        except Exception as e:
+            self.api.show_message("critical", "Commit Failed", f"Could not read Git author info to create commit: {e}")
             return
 
         self.set_ui_locked(True, f"Committing changes in {os.path.basename(path)}...")
-        self.git_manager.commit_files(path, message)
+        self.git_manager.commit_files(path, message, author)
 
     def _on_cleanup_tags_clicked(self):
         """Handles the logic when the 'Cleanup Tags' button is clicked."""
