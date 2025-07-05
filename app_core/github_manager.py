@@ -3,7 +3,7 @@ import requests
 import time
 import os
 import json
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from .settings_manager import settings_manager
 from utils.versioning import APP_VERSION
@@ -126,26 +126,32 @@ class GitHubWorker(QObject):
             log.error(f"Failed to get user info from GitHub: {e}")
             return None
 
+    def _paginated_request(self, url: str) -> List[Dict]:
+        """Helper to handle paginated GitHub API requests."""
+        all_items = []
+        page = 1
+        while True:
+            paginated_url = f"{url}?page={page}&per_page=100"
+            response = requests.get(
+                paginated_url, headers=self._get_headers(), timeout=15
+            )
+            response.raise_for_status()
+            data = response.json()
+            if not data:
+                break
+            all_items.extend(data)
+            page += 1
+        return all_items
+
     def list_user_repos(self):
         if not self.access_token:
             self.operation_failed.emit("Not logged in to GitHub.")
             return
         try:
-            all_repos = []
-            page = 1
-            while True:
-                url = (f"https://api.github.com/user/repos?page={page}"
-                       f"&per_page=100&sort=updated")
-                response = requests.get(
-                    url, headers=self._get_headers(), timeout=10
-                )
-                response.raise_for_status()
-                data = response.json()
-                if not data:
-                    break
-                all_repos.extend(data)
-                page += 1
-            self.repos_ready.emit(all_repos)
+            # Use the paginated helper
+            all_repos = self._paginated_request("https://api.github.com/user/repos")
+            # Sort by most recently pushed to
+            self.repos_ready.emit(sorted(all_repos, key=lambda r: r.get('pushed_at', ''), reverse=True))
         except requests.RequestException as e:
             self.operation_failed.emit(f"Failed to list repositories: {e}")
 
@@ -236,7 +242,7 @@ class GitHubWorker(QObject):
             )
         except requests.RequestException as e:
             msg = f"Failed to delete release: {e}"
-            if e.response:
+            if hasattr(e, 'response') and e.response:
                 msg += f" (Status: {e.response.status_code})"
             self.operation_failed.emit(msg)
 
@@ -256,7 +262,7 @@ class GitHubWorker(QObject):
                 f"Repository '{name}' created.", response.json()
             )
         except requests.RequestException as e:
-            error_msg = e.response.json().get('message', str(e))
+            error_msg = e.response.json().get('message', str(e)) if hasattr(e, 'response') and e.response else str(e)
             self.operation_failed.emit(
                 f"Failed to create repository: {error_msg}")
 
@@ -290,9 +296,77 @@ class GitHubWorker(QObject):
                 response.json()
             )
         except requests.RequestException as e:
-            error_msg = e.response.json().get('message', str(e))
+            error_msg = e.response.json().get('message', str(e)) if hasattr(e, 'response') and e.response else str(e)
             self.operation_failed.emit(
                 f"Failed to change visibility: {error_msg}")
+
+    def list_repo_tags(self, owner: str, repo: str) -> List[Dict]:
+        """Fetches all tags for a repository."""
+        url = f"https://api.github.com/repos/{owner}/{repo}/tags"
+        return self._paginated_request(url)
+
+    def list_repo_releases(self, owner: str, repo: str) -> List[Dict]:
+        """Fetches all releases for a repository."""
+        url = f"https://api.github.com/repos/{owner}/{repo}/releases"
+        return self._paginated_request(url)
+
+    def delete_remote_tag_ref(self, owner: str, repo: str, tag: str) -> bool:
+        """Deletes a tag reference from the remote repository."""
+        url = f"https://api.github.com/repos/{owner}/{repo}/git/refs/tags/{tag}"
+        try:
+            response = requests.delete(url, headers=self._get_headers(), timeout=10)
+            response.raise_for_status()
+            log.info(f"Successfully deleted remote tag ref: {tag}")
+            return True
+        except requests.RequestException as e:
+            log.error(f"Failed to delete tag '{tag}': {e}")
+            return False
+
+    def cleanup_orphaned_tags(self, owner: str, repo: str):
+        """Finds and deletes tags that are not associated with any release."""
+        if not self.access_token:
+            self.operation_failed.emit("Not logged in to GitHub.")
+            return
+
+        try:
+            log.info(f"Starting orphaned tag cleanup for {owner}/{repo}")
+            all_tags_data = self.list_repo_tags(owner, repo)
+            all_releases_data = self.list_repo_releases(owner, repo)
+
+            all_tag_names = {tag['name'] for tag in all_tags_data}
+            release_tag_names = {rel['tag_name'] for rel in all_releases_data}
+
+            orphaned_tags = all_tag_names - release_tag_names
+            log.info(f"Found {len(orphaned_tags)} orphaned tags: {orphaned_tags}")
+
+            if not orphaned_tags:
+                self.operation_success.emit("No orphaned tags found to clean up.", {})
+                return
+
+            deleted_tags, failed_tags = [], []
+            for tag in orphaned_tags:
+                if self.delete_remote_tag_ref(owner, repo, tag):
+                    deleted_tags.append(tag)
+                else:
+                    failed_tags.append(tag)
+
+            summary_lines = []
+            if deleted_tags:
+                summary_lines.append(f"Successfully deleted {len(deleted_tags)} orphaned tags: {', '.join(deleted_tags)}")
+            if failed_tags:
+                summary_lines.append(f"Failed to delete {len(failed_tags)} tags: {', '.join(failed_tags)}")
+
+            final_message = "\n".join(summary_lines)
+            if failed_tags:
+                self.operation_failed.emit(final_message)
+            else:
+                self.operation_success.emit(final_message, {"deleted_tags": deleted_tags})
+
+        except requests.RequestException as e:
+            self.operation_failed.emit(f"Failed to fetch repo data for cleanup: {e}")
+        except Exception as e:
+            log.error(f"Unexpected error during tag cleanup: {e}", exc_info=True)
+            self.operation_failed.emit("An unexpected error occurred during cleanup.")
 
 
 class GitHubManager(QObject):
@@ -320,6 +394,7 @@ class GitHubManager(QObject):
     _request_update_visibility = pyqtSignal(str, str, bool)
     _request_plugin_index = pyqtSignal(str)
     _request_delete_release = pyqtSignal(str, str, int)
+    _request_cleanup_tags = pyqtSignal(str, str)
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -341,6 +416,7 @@ class GitHubManager(QObject):
             self.worker.update_repo_visibility)
         self._request_plugin_index.connect(self.worker.fetch_plugin_index)
         self._request_delete_release.connect(self.worker.delete_release)
+        self._request_cleanup_tags.connect(self.worker.cleanup_orphaned_tags)
 
         self.worker.device_code_ready.connect(self.device_code_ready)
         self.worker.auth_successful.connect(self._on_auth_successful)
@@ -365,6 +441,24 @@ class GitHubManager(QObject):
 
     def get_user_info(self) -> Optional[Dict]:
         return self.user_info
+
+    def get_active_repo_config(self) -> Optional[Dict]:
+        """
+        Retrieves the configuration dictionary for the repo marked as active.
+        This is the single source of truth for the project's main repository.
+
+        Returns:
+            A dictionary with 'owner' and 'repo' keys, or None if not set.
+        """
+        active_repo_id = settings_manager.get("active_update_repo_id")
+        if not active_repo_id:
+            return None
+
+        all_repos = settings_manager.get("source_control_repos", [])
+        active_repo_config = next(
+            (r for r in all_repos if r.get("id") == active_repo_id), None
+        )
+        return active_repo_config
 
     def start_device_flow(self):
         self._start_device_flow.emit()
@@ -407,6 +501,10 @@ class GitHubManager(QObject):
 
     def fetch_plugin_index(self, repo_path: str):
         self._request_plugin_index.emit(repo_path)
+        
+    def cleanup_orphaned_tags(self, owner: str, repo: str):
+        """Requests a cleanup of orphaned tags for the specified repository."""
+        self._request_cleanup_tags.emit(owner, repo)
 
     def shutdown(self):
         if self.thread and self.thread.isRunning():

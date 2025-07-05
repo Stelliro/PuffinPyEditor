@@ -46,7 +46,7 @@ class Plugin:
     manifest: Dict[str, Any]
     path: str
     source_type: str  # 'built-in', 'core-tool', 'user'
-    is_core: bool = False  # MODIFIED: Default to False, will be set by manager
+    is_core: bool = False
     is_loaded: bool = False
     enabled: bool = True
     module: Optional[Any] = None
@@ -64,9 +64,8 @@ class Plugin:
 
 
 class PluginManager:
-    # MODIFIED: Removed integrated plugins and renamed python_runner.
     ESSENTIAL_PLUGIN_IDS = {
-        'python_tools',  # Core script execution and output panel
+        'python_tools',
     }
 
     def __init__(self, main_window):
@@ -97,11 +96,10 @@ class PluginManager:
     def discover_and_load_plugins(self, ignore_list: Optional[List[str]] = None):
         log.info("Starting full plugin discovery and loading process...")
         ignore_list = ignore_list or []
-        # Clear existing loaded plugins to allow for full reload
         for plugin in self.get_loaded_plugins():
             self.unload_plugin(plugin.id)
 
-        self.plugins.clear()  # Clear the dictionary for a fresh discovery
+        self.plugins.clear()
         self._discover_plugins()
         self._load_plugin_states()
         load_order = self._resolve_dependencies()
@@ -139,10 +137,9 @@ class PluginManager:
                 manifest = json.load(f)
             if not self._validate_manifest(manifest, manifest_path): return
             plugin_id = manifest['id']
-            if plugin_id in self.plugins: return  # Avoid duplicates
+            if plugin_id in self.plugins: return
 
             plugin = Plugin(manifest=manifest, path=plugin_path, source_type=source_type)
-            # Set the `is_core` flag based on our explicit list
             plugin.is_core = plugin.id in self.ESSENTIAL_PLUGIN_IDS
 
             self.plugins[plugin_id] = plugin
@@ -158,16 +155,12 @@ class PluginManager:
 
     def _resolve_dependencies(self) -> List[str]:
         log.info("Resolving plugin dependencies...")
-
-        # *** This block is the corrected logic ***
         dependencies = {}
         for pid, p in self.plugins.items():
             deps_field = p.manifest.get('dependencies', [])
             if isinstance(deps_field, dict):
-                # Handles {"other_plugin": ">=1.0.0"}
                 dependencies[pid] = set(deps_field.keys())
             elif isinstance(deps_field, list):
-                # Handles ["other_plugin_1", "other_plugin_2"]
                 dependencies[pid] = set(deps_field)
             else:
                 log.warning(f"Plugin '{p.name}' has an invalid 'dependencies' format. Must be an object or array.")
@@ -277,17 +270,14 @@ class PluginManager:
         try:
             if hasattr(plugin.instance, 'shutdown'): plugin.instance.shutdown()
 
-            # Remove the instance and module reference from our tracking
             plugin.is_loaded = False
             plugin.instance = None
             module_name = plugin.module.__name__ if plugin.module else None
             plugin.module = None
 
-            # Clean up from sys.modules to allow for a true reload
             if module_name and module_name in sys.modules:
                 del sys.modules[module_name]
 
-            # Attempt to garbage collect to release resources
             import gc
             gc.collect()
 
@@ -375,7 +365,20 @@ class PluginManager:
         return list(self.plugins.values())
 
     def get_installed_plugins(self) -> list:
-        return [p.manifest for p in self.get_all_plugins()]
+        """
+        Returns a list of dictionaries, where each dictionary contains the
+        plugin's manifest data plus its absolute path and source type.
+        This provides all necessary info for tools like the Plugin Publisher.
+        """
+        installed_plugins_data = []
+        for p in self.get_all_plugins():
+            # Create a copy of the manifest to avoid modifying the original
+            plugin_data = p.manifest.copy()
+            # Add the crucial path and source_type information
+            plugin_data['path'] = p.path
+            plugin_data['source_type'] = p.source_type
+            installed_plugins_data.append(plugin_data)
+        return installed_plugins_data
 
     def get_loaded_plugins(self) -> List[Plugin]:
         return [p for p in self.plugins.values() if p.is_loaded]
@@ -415,11 +418,9 @@ class PluginManager:
     def uninstall_plugin(self, plugin_id: str) -> Tuple[bool, str]:
         plugin = self.plugins.get(plugin_id)
         if not plugin: return False, f"Plugin '{plugin_id}' is not installed."
-        # MODIFIED: A plugin can only be uninstalled if it's a 'user' plugin.
         if plugin.source_type != 'user':
             return False, "This is a built-in or core tool and cannot be uninstalled."
 
-        # The rest of the logic can proceed
         self.unload_plugin(plugin_id)
         target_path = os.path.join(self.user_plugins_directory, plugin_id)
         if not os.path.isdir(target_path): return False, f"Plugin directory for '{plugin_id}' not found."

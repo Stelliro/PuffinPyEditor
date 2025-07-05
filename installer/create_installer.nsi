@@ -1,5 +1,5 @@
 ; PuffinPyEditor NSIS Installer Script
-; Version 3.0 - Modular Components
+; Version 3.1 - Corrected File Paths
 
 ; Use variables passed from the command line by build.py
 !ifndef APP_NAME
@@ -63,8 +63,10 @@ Section "PuffinPyEditor Core" SecPuffinPy
 
   ; Core executables and libraries
   File "${SRC_DIR}\*.exe"
-  File "${SRC_DIR}\*.dll"
-  File "${SRC_DIR}\*.pyd"
+  ; REMOVED: These lines are incorrect. PyInstaller places DLLs/PYDs in subdirectories,
+  ; which are already handled by the recursive File commands below.
+  ; File "${SRC_DIR}\*.dll"
+  ; File "${SRC_DIR}\*.pyd"
   File "${SRC_DIR}\base_library.zip"
   
   ; Required directories

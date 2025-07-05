@@ -10,6 +10,8 @@ import qtawesome as qta
 
 from app_core.project_manager import ProjectManager
 from app_core.source_control_manager import SourceControlManager
+from app_core.github_manager import GitHubManager
+from app_core.puffin_api import PuffinPluginAPI
 
 
 class ProjectSourceControlPanel(QWidget):
@@ -23,10 +25,14 @@ class ProjectSourceControlPanel(QWidget):
     change_visibility_requested = pyqtSignal(str)
 
     def __init__(self, project_manager: ProjectManager,
-                 git_manager: SourceControlManager, parent=None):
+                 git_manager: SourceControlManager,
+                 github_manager: GitHubManager,
+                 puffin_api: PuffinPluginAPI, parent=None):
         super().__init__(parent)
         self.project_manager = project_manager
         self.git_manager = git_manager
+        self.github_manager = github_manager
+        self.api = puffin_api
         self.staged_color = QColor("#A7C080")
         self.unstaged_color = QColor("#DBBC7F")
         self._setup_ui()
@@ -41,19 +47,25 @@ class ProjectSourceControlPanel(QWidget):
         self.pull_button = QPushButton("Pull")
         self.push_button = QPushButton("Push")
         self.new_release_button = QPushButton("New Release...")
+        self.cleanup_tags_button = QPushButton("Cleanup Tags")
+        self.cleanup_tags_button.setToolTip("Delete remote tags that are not part of a release.")
+        
         toolbar_layout.addWidget(self.refresh_all_button)
         toolbar_layout.addWidget(self.pull_button)
         toolbar_layout.addWidget(self.push_button)
         toolbar_layout.addStretch()
+        toolbar_layout.addWidget(self.cleanup_tags_button)
         toolbar_layout.addWidget(self.new_release_button)
         layout.addLayout(toolbar_layout)
+
         self.project_tree = QTreeWidget()
         self.project_tree.setHeaderLabels(["Project / Changes", ""])
         self.project_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         header = self.project_tree.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         layout.addWidget(self.project_tree)
+
         self.commit_message_edit = QLineEdit()
         self.commit_message_edit.setPlaceholderText("Commit message...")
         self.commit_button = QPushButton("Commit All")
@@ -63,18 +75,23 @@ class ProjectSourceControlPanel(QWidget):
         layout.addLayout(commit_layout)
         self.status_label = QLabel("Ready.")
         layout.addWidget(self.status_label)
+
         self.action_buttons = [self.refresh_all_button, self.pull_button, self.push_button,
-                               self.new_release_button, self.commit_button]
+                               self.new_release_button, self.commit_button, self.cleanup_tags_button]
 
     def _connect_signals(self):
         self.git_manager.summaries_ready.connect(self._populate_tree)
         self.git_manager.status_updated.connect(self._update_project_files)
         self.git_manager.git_error.connect(self._handle_git_error)
         self.git_manager.git_success.connect(self._handle_git_success)
+        self.github_manager.operation_success.connect(self._handle_git_success)
+        self.github_manager.operation_failed.connect(self._handle_git_error)
+        
         self.refresh_all_button.clicked.connect(self.refresh_all_projects)
         self.push_button.clicked.connect(self._on_push_clicked)
         self.pull_button.clicked.connect(self._on_pull_clicked)
         self.new_release_button.clicked.connect(self._on_new_release_clicked)
+        self.cleanup_tags_button.clicked.connect(self._on_cleanup_tags_clicked)
         self.commit_button.clicked.connect(self._on_commit_clicked)
         self.project_tree.customContextMenuRequested.connect(self._show_context_menu)
 
@@ -89,6 +106,7 @@ class ProjectSourceControlPanel(QWidget):
         self.pull_button.setIcon(qta.icon('mdi.arrow-down-bold-outline'))
         self.push_button.setIcon(qta.icon('mdi.arrow-up-bold-outline'))
         self.new_release_button.setIcon(qta.icon('mdi.tag-outline'))
+        self.cleanup_tags_button.setIcon(qta.icon('mdi.tag-remove-outline'))
         self.commit_button.setIcon(qta.icon('mdi.check'))
 
     def _get_selected_project_path(self) -> Optional[str]:
@@ -121,9 +139,49 @@ class ProjectSourceControlPanel(QWidget):
             QMessageBox.warning(self, "Commit Failed", "A project must be selected "
                                 "and a commit message must be provided.")
             return
+
+        gh_tools = self.api.get_plugin_instance("github_tools")
+        if not gh_tools or not gh_tools.ensure_git_identity(path):
+            return
+
         self.set_ui_locked(True, f"Committing changes in {os.path.basename(path)}...")
         self.git_manager.commit_files(path, message)
 
+    def _on_cleanup_tags_clicked(self):
+        """Handles the logic when the 'Cleanup Tags' button is clicked."""
+        path = self._get_selected_project_path()
+        if not path:
+            QMessageBox.warning(self, "No Project Selected", "Please select a Git project.")
+            return
+
+        try:
+            repo = Repo(path)
+            if not repo.remotes:
+                QMessageBox.warning(self, "No Remote", "The selected project does not have a remote configured.")
+                return
+            remote_url = repo.remotes.origin.url
+            owner, repo_name = self.git_manager.parse_git_url(remote_url)
+            if not owner or not repo_name:
+                QMessageBox.critical(self, "Error", "Could not parse owner/repo from the remote URL.")
+                return
+        except Exception as e:
+            QMessageBox.critical(self, "Git Error", f"Could not analyze repository: {e}")
+            return
+            
+        reply = QMessageBox.question(
+            self,
+            "Confirm Tag Cleanup",
+            "This will permanently delete all tags from the remote repository "
+            f"<b>{owner}/{repo_name}</b> that are NOT associated with a GitHub Release.\n\n"
+            "This action cannot be undone. Are you sure you want to continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.set_ui_locked(True, f"Cleaning up tags for {owner}/{repo_name}...")
+            self.github_manager.cleanup_orphaned_tags(owner, repo_name)
+    
     def _on_fix_branch_mismatch_clicked(self, path: str):
         reply = QMessageBox.warning(
             self, "Confirm Branch Fix", "This will perform a force-push and delete "
@@ -136,6 +194,9 @@ class ProjectSourceControlPanel(QWidget):
             self.git_manager.fix_branch_mismatch(path)
 
     def _handle_git_success(self, message: str, data: dict):
+        if data.get("deleted_tags") is not None:
+             QMessageBox.information(self, "Cleanup Complete", message)
+
         self.set_ui_locked(False, f"Success: {message}")
         self.refresh_all_projects()
         if "committed" in message.lower() and not data.get('no_changes'):
@@ -143,6 +204,7 @@ class ProjectSourceControlPanel(QWidget):
 
     def _handle_git_error(self, error_message: str):
         self.set_ui_locked(False, f"Error: {error_message}")
+        QMessageBox.critical(self, "Operation Failed", error_message)
         self.refresh_all_projects()
 
     def refresh_all_projects(self):

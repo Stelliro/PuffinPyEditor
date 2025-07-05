@@ -216,7 +216,9 @@ class MainWindow(QMainWindow):
         self.problems_panel.problem_selected.connect(self._goto_definition_result)
 
     def _integrate_source_control_ui(self):
-        self.source_control_panel = ProjectSourceControlPanel(self.project_manager, self.git_manager, self)
+        self.source_control_panel = ProjectSourceControlPanel(
+            self.project_manager, self.git_manager, self.github_manager, self.puffin_api, self
+        )
         self.add_dock_panel(self.source_control_panel, "Source Control", Qt.DockWidgetArea.BottomDockWidgetArea,
                             "mdi.git")
 

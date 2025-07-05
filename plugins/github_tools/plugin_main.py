@@ -3,6 +3,7 @@ import os
 import shutil
 import tempfile
 import git
+import configparser
 from PyQt6.QtWidgets import (QInputDialog, QMessageBox, QTextEdit, QDialog,
                              QVBoxLayout, QLabel, QProgressBar, QPushButton,
                              QDialogButtonBox)
@@ -99,20 +100,60 @@ class GitHubToolsPlugin:
         if self.progress_dialog:
             self.progress_dialog.add_log(message, is_error)
 
-    def _ensure_git_identity(self, project_path: str) -> bool:
-        self._log_to_dialog("Checking Git author information...")
+    def ensure_git_identity(self, project_path: str, log_to_dialog=False) -> bool:
+        """
+        Ensures the local repo is configured to use an email associated with the
+        logged-in GitHub account, which is required for contributions to be counted.
+        It will overwrite a misconfigured local email.
+
+        Returns True on success, False on failure.
+        """
+        log_func = self._log_to_dialog if log_to_dialog else self.api.log_info
+        log_func("Verifying Git identity for contributions...")
+
         user_info = self.github_manager.get_user_info()
-        if not user_info: self.api.show_message("warning", "GitHub User Not Found",
-                                                "Could not fetch GitHub user info. Please log in."); return False
+        if not user_info or not user_info.get('login'):
+            self.api.show_message("warning", "GitHub Login Required",
+                                  "You must be logged into GitHub to ensure your commits are counted as contributions.")
+            return False
+
+        # Construct the set of valid emails for this user
+        valid_emails = set()
+        user_name = user_info.get('login')
+        public_email = user_info.get('email')
+        noreply_email = f"{user_info.get('id')}+{user_name}@users.noreply.github.com"
+
+        if public_email:
+            valid_emails.add(public_email.lower())
+        valid_emails.add(noreply_email.lower())
+
         try:
-            repo, user_name, user_email = git.Repo(project_path), user_info.get('login'), user_info.get('email')
-            if not user_email: user_email = (f"{user_info.get('id')}+{user_name}@users.noreply.github.com")
-            self._log_to_dialog(f"Setting git author: Name='{user_name}', Email='{user_email}'")
-            with repo.config_writer() as config:
-                config.set_value('user', 'name', user_name); config.set_value('user', 'email', user_email)
+            repo = git.Repo(project_path)
+            current_email = ""
+            # Check for an existing email config
+            try:
+                with repo.config_reader() as cr:
+                    current_email = cr.get_value('user', 'email', '').lower()
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                log_func("No local or global git email is set.")
+                pass  # No email is set, we can proceed to set it.
+
+            # If the current email is not valid for contributions, overwrite it locally.
+            if current_email not in valid_emails:
+                log_func(f"Current git email ('{current_email}') is not valid for contributions. Updating local config.")
+                with repo.config_writer() as config:
+                    config.set_value('user', 'name', user_name)
+                    # Prefer the noreply email for privacy and consistency
+                    config.set_value('user', 'email', noreply_email)
+                log_func(f"Successfully set local git identity to '{user_name} <{noreply_email}>'.")
+            else:
+                log_func(f"Verified Git identity is correctly set to '{current_email}'.")
+
             return True
+
         except Exception as e:
-            self.api.show_message("warning", "Git Config Failed", f"Failed to set Git author info: {e}"); return False
+            self.api.show_message("critical", "Git Configuration Error", f"Could not verify or set Git configuration: {e}")
+            return False
 
     def show_create_release_dialog(self, project_path: str = None):
         if not project_path: project_path = self.project_manager.get_active_project_path()
@@ -130,18 +171,8 @@ class GitHubToolsPlugin:
         self.progress_dialog = UploadProgressDialog(self.main_window)
         self.progress_dialog.show()
 
-        if not self._ensure_git_identity(project_path):
-            self._on_release_step_failed("Git identity misconfiguration.")
-            return
-
-        try:
-            repo = git.Repo(project_path)
-            with repo.config_reader() as cr:
-                cr.get_value('user', 'name')
-                cr.get_value('user', 'email')
-        except Exception:
-            self._on_release_step_failed(
-                "Git user.name and user.email are not configured. Please set them in Preferences > Source Control.");
+        if not self.ensure_git_identity(project_path, log_to_dialog=True):
+            self._on_release_step_failed("Git identity misconfiguration. Commit cannot be created.")
             return
 
         try:
@@ -389,6 +420,11 @@ class GitHubToolsPlugin:
                                              text=os.path.basename(local_path))
         if not ok or not repo_name:
             if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False, "Publish cancelled."); return
+        
+        if not self.ensure_git_identity(local_path):
+            if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False, "Publish cancelled: Git identity not set.")
+            return
+
         description, _ = QInputDialog.getText(self.main_window, "Publish to GitHub", "Description (optional):")
         is_private = QMessageBox.question(self.main_window, "Visibility", "Make this repository private?",
                                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -410,6 +446,11 @@ class GitHubToolsPlugin:
     def _link_repo(self, local_path):
         dialog = SelectRepoDialog(self.github_manager, self.main_window)
         if dialog.exec() and (repo_data := dialog.selected_repo_data):
+            
+            if not self.ensure_git_identity(local_path):
+                if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False, "Link cancelled: Git identity not set.")
+                return
+
             if clone_url := repo_data.get('clone_url'):
                 if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(True, "Linking to remote...")
                 self.git_manager.link_to_remote(local_path, clone_url)

@@ -196,23 +196,34 @@ class GitWorker(QObject):
             if not author:
                 return
 
+            # If there are no commits, create a sensible initial one.
             if not repo.head.is_valid():
                 log.info("No commits found. Creating initial commit.")
+                gitignore_path = os.path.join(repo_path, ".gitignore")
+                
+                # Create a default .gitignore if one doesn't already exist
+                if not os.path.exists(gitignore_path):
+                    with open(gitignore_path, 'w', encoding='utf-8') as f:
+                        f.write("# Python\n__pycache__/\n*.pyc\n\n# Env\n.env\nvenv/\n.venv/\n\n# Build\nbuild/\ndist/\n*.egg-info/\n")
+                    log.info(f"Created default .gitignore at {gitignore_path}")
+                
+                # Stage all changes (including the new .gitignore if created)
+                repo.git.add(A=True)
+                
+                # Only commit if there's something to commit
                 if repo.is_dirty(untracked_files=True):
-                    repo.git.add(A=True)
-                    repo.index.commit(
-                        "Initial commit for release",
-                        author=author, committer=author
-                    )
+                    repo.index.commit("Initial commit", author=author, committer=author)
+                    log.info("Successfully created initial commit.")
                 else:
-                    self.error_occurred.emit(
-                        "Cannot tag an empty project with no files."
-                    )
+                    # This case can happen if .gitignore already existed and was tracked.
+                    # If there's truly nothing to commit, we can't create a tag.
+                    self.error_occurred.emit("Cannot tag an empty project with no changes to commit.")
                     return
 
             if tag in repo.tags:
                 log.warning(f"Tag '{tag}' already exists. Re-creating it.")
                 repo.delete_tag(tag)
+            
             repo.create_tag(tag, message=title)
             self.operation_success.emit(f"Tag created: {tag}", {})
         except GitCommandError as e:
