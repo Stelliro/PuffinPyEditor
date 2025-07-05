@@ -156,11 +156,7 @@ class GitHubToolsPlugin:
         try:
             repo = git.Repo(project_path)
             
-            # FIX: The check for a "dirty" repo was too aggressive. This new check is more precise.
-            # 1. Check for modified tracked files.
             is_modified = repo.is_dirty(untracked_files=False)
-            # 2. Check for untracked files that are NOT in .gitignore.
-            #    `repo.untracked_files` correctly respects .gitignore.
             relevant_untracked_files = repo.untracked_files
 
             if is_modified or relevant_untracked_files:
@@ -181,11 +177,12 @@ class GitHubToolsPlugin:
             if os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD')):
                 msg_box = QMessageBox(self.main_window)
                 msg_box.setIcon(QMessageBox.Icon.Warning)
+                msg_box.setTextFormat(Qt.TextFormat.RichText)
                 msg_box.setWindowTitle("Unresolved Merge")
                 msg_box.setText("Your repository has an unresolved merge conflict.")
                 msg_box.setInformativeText(
-                    "To proceed, you must resolve this state.\n\n"
-                    "• <b>Abort Merge:</b> This will cancel the merge and revert your project to the state before the merge began. This is a safe option if you are unsure.\n\n"
+                    "To proceed, you must resolve this state.<br><br>"
+                    "• <b>Abort Merge:</b> This will cancel the merge and revert your project to the state before the merge began. This is a safe option if you are unsure.<br><br>"
                     "• <b>Cancel:</b> Do nothing. You will need to resolve the conflicts manually (e.g., using the command line) before you can proceed."
                 )
                 abort_button = msg_box.addButton("Abort Merge", QMessageBox.ButtonRole.DestructiveRole)
@@ -414,7 +411,6 @@ class GitHubToolsPlugin:
                     f"Installer not found at '{installer_path}'. Build may have failed or produced an unexpected filename.")
                 return
 
-        # --- Create source code zip ---
         repo_name = self._release_state['repo_name']
         try:
             temp_zip_dir = tempfile.mkdtemp()
@@ -431,7 +427,7 @@ class GitHubToolsPlugin:
 
         if not assets_to_upload:
             self._log_to_dialog("No assets to upload, finishing release.")
-            self._cleanup_release_process(success=True) # End of the line if no assets
+            self._cleanup_release_process(success=True)
             return
 
         self._release_state['asset_queue'] = assets_to_upload
@@ -442,7 +438,7 @@ class GitHubToolsPlugin:
         asset_queue = self._release_state.get('asset_queue', [])
         if not asset_queue:
             self._log_to_dialog("All assets uploaded successfully.")
-            self._cleanup_release_process(success=True) # End of the line
+            self._cleanup_release_process(success=True)
             return
         asset_path, upload_url = asset_queue.pop(0), self._release_state['release_info']['upload_url']
         if self.progress_dialog: self.progress_dialog.set_step(f"Uploading {os.path.basename(asset_path)}")
