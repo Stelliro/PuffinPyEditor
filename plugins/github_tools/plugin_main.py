@@ -102,13 +102,6 @@ class GitHubToolsPlugin:
             self.progress_dialog.add_log(message, is_error)
 
     def ensure_git_identity(self, project_path: str, log_to_dialog=False) -> bool:
-        """
-        FIX: Ensures the local repo is configured to use an email associated with the
-        logged-in GitHub account, which is required for contributions to be counted.
-        It will overwrite a misconfigured local email.
-
-        Returns True on success, False on failure.
-        """
         log_func = self._log_to_dialog if log_to_dialog else self.api.log_info
         log_func("Verifying Git identity for contributions...")
 
@@ -118,7 +111,6 @@ class GitHubToolsPlugin:
                                   "You must be logged into GitHub to ensure your commits are counted as contributions.")
             return False
 
-        # Construct the set of valid emails for this user
         valid_emails = set()
         user_name = user_info.get('login')
         public_email = user_info.get('email')
@@ -131,20 +123,17 @@ class GitHubToolsPlugin:
         try:
             repo = git.Repo(project_path)
             current_email = ""
-            # Check for an existing email config
             try:
                 with repo.config_reader() as cr:
                     current_email = cr.get_value('user', 'email', '').lower()
             except (configparser.NoSectionError, configparser.NoOptionError):
                 log_func("No local or global git email is set.")
-                pass  # No email is set, we can proceed to set it.
+                pass
 
-            # If the current email is not valid for contributions, overwrite it locally.
             if current_email not in valid_emails:
                 log_func(f"Current git email ('{current_email}') is not valid for contributions. Updating local config.")
                 with repo.config_writer() as config:
                     config.set_value('user', 'name', user_name)
-                    # Prefer the noreply email for privacy and consistency
                     config.set_value('user', 'email', noreply_email)
                 log_func(f"Successfully set local git identity to '{user_name} <{noreply_email}>'.")
             else:
@@ -164,20 +153,61 @@ class GitHubToolsPlugin:
         self._create_release(project_path)
 
     def _create_release(self, project_path):
-        # FIX: Add a pre-flight check to ensure the repository is in a clean state before starting.
         try:
             repo = git.Repo(project_path)
-            if repo.is_dirty(untracked_files=False):
+            
+            # FIX: The check for a "dirty" repo was too aggressive. This new check is more precise.
+            # 1. Check for modified tracked files.
+            is_modified = repo.is_dirty(untracked_files=False)
+            # 2. Check for untracked files that are NOT in .gitignore.
+            #    `repo.untracked_files` correctly respects .gitignore.
+            relevant_untracked_files = repo.untracked_files
+
+            if is_modified or relevant_untracked_files:
+                error_details = []
+                if is_modified:
+                    modified_files_list = [item.a_path for item in repo.index.diff(None)]
+                    error_details.append(f"• {len(modified_files_list)} modified file(s) exist.")
+                if relevant_untracked_files:
+                    error_details.append(f"• {len(relevant_untracked_files)} untracked file(s) exist.")
+                
                 self.api.show_message(
                     "critical", "Uncommitted Changes",
-                    "Your repository has uncommitted changes. Please commit or stash them before creating a release."
+                    "Your repository has changes that must be committed or stashed before creating a release.\n\n" +
+                    "\n".join(error_details)
                 )
                 return
+
             if os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD')):
-                self.api.show_message(
-                    "critical", "Unresolved Merge",
-                    "Your repository has an unresolved merge conflict. Please resolve the conflict, commit the changes, or abort the merge before creating a release."
+                msg_box = QMessageBox(self.main_window)
+                msg_box.setIcon(QMessageBox.Icon.Warning)
+                msg_box.setWindowTitle("Unresolved Merge")
+                msg_box.setText("Your repository has an unresolved merge conflict.")
+                msg_box.setInformativeText(
+                    "To proceed, you must resolve this state.\n\n"
+                    "• <b>Abort Merge:</b> This will cancel the merge and revert your project to the state before the merge began. This is a safe option if you are unsure.\n\n"
+                    "• <b>Cancel:</b> Do nothing. You will need to resolve the conflicts manually (e.g., using the command line) before you can proceed."
                 )
+                abort_button = msg_box.addButton("Abort Merge", QMessageBox.ButtonRole.DestructiveRole)
+                cancel_button = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+                msg_box.setDefaultButton(cancel_button)
+                
+                msg_box.exec()
+
+                if msg_box.clickedButton() == abort_button:
+                    try:
+                        self.api.log_info("User chose to abort the merge.")
+                        repo.git.merge('--abort')
+                        self.api.show_message(
+                            "info", "Merge Aborted",
+                            "The merge has been successfully aborted. Your repository is now in a clean state. Please try creating the release again."
+                        )
+                    except git.GitCommandError as e:
+                        self.api.log_error(f"Failed to abort merge: {e}")
+                        self.api.show_message(
+                            "critical", "Abort Failed",
+                            f"Could not abort the merge. Please check the logs or use the command line.\n\nError: {e.stderr}"
+                        )
                 return
         except Exception as e:
             self.api.show_message("critical", "Repository Error", f"Could not check repository status: {e}")
@@ -196,7 +226,6 @@ class GitHubToolsPlugin:
             return
 
         try:
-            # Re-get repo object in case something changed, though unlikely.
             repo = git.Repo(project_path)
             if not repo.remotes: self._on_release_step_failed("This project has no remote repository."); return
             remote_url = repo.remotes.origin.url
@@ -279,7 +308,6 @@ class GitHubToolsPlugin:
         step = self._release_state.get('step')
         self._log_to_dialog(f"SUCCESS on step '{step}': {msg}")
         
-        # New logical flow
         if step == "PULL_CHANGES":
             self._advance_release_state("BUMP_VERSION_COMMIT")
         elif step == "BUMP_VERSION_COMMIT":
