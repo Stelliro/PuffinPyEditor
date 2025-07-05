@@ -77,7 +77,6 @@ class RustSyntaxHighlighter(QSyntaxHighlighter):
 
     def _format_function_definition(self, match):
         """Custom formatter to style `fn` as keyword and name as functionName."""
-        # THE FIX: Don't call self.parent(). Use self.formats directly.
         self.setFormat(match.capturedStart(1), match.capturedLength(1), self.formats["keyword"])
         self.setFormat(match.capturedStart(2), match.capturedLength(2), self.formats["functionName"])
 
@@ -90,34 +89,39 @@ class RustSyntaxHighlighter(QSyntaxHighlighter):
                     fmt(match)
                 else:
                     self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
+        
         self.setCurrentBlockState(0)
-        in_multiline_comment = self.previousBlockState() == 1
-        start_index = 0
-        if in_multiline_comment:
+        search_index = 0
+
+        # Elegantly handle continuation from a previous block
+        if self.previousBlockState() == 1:
             end_match = self.comment_end_expression.match(text, 0)
-            if end_match.hasMatch():
-                length = end_match.capturedEnd()
-                self.setFormat(0, length, self.multiline_comment_format)
-                start_index = length
-            else:
+            if not end_match.hasMatch():
+                # The entire block is a comment, our work is simple and swift.
                 self.setCurrentBlockState(1)
                 self.setFormat(0, len(text), self.multiline_comment_format)
                 return
-        search_index = start_index
-        while search_index >= 0 and search_index < len(text):
-            start_match = self.comment_start_expression.match(text, search_index)
-            if not start_match.hasMatch():
-                break
+            
+            # The comment concludes, we find our new starting point.
+            length = end_match.capturedEnd()
+            self.setFormat(0, length, self.multiline_comment_format)
+            search_index = length
+
+        # Now, we seek new comments with a more expressive loop.
+        while (start_match := self.comment_start_expression.match(text, search_index)).hasMatch():
             start_pos = start_match.capturedStart()
             end_match = self.comment_end_expression.match(text, start_pos + start_match.capturedLength())
-            if end_match.hasMatch():
-                length = end_match.capturedEnd() - start_pos
-                self.setFormat(start_pos, length, self.multiline_comment_format)
-                search_index = end_match.capturedEnd()
-            else:
+
+            if not end_match.hasMatch():
+                # An unclosed comment, a cliffhanger for the next block.
                 self.setCurrentBlockState(1)
                 self.setFormat(start_pos, len(text) - start_pos, self.multiline_comment_format)
-                return
+                return  # Our tale for this block is told.
+            
+            # A complete, self-contained comment.
+            length = end_match.capturedEnd() - start_pos
+            self.setFormat(start_pos, length, self.multiline_comment_format)
+            search_index = end_match.capturedEnd()
 
     def rehighlight_document(self):
         self.initialize_formats_and_rules()

@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         self._integrate_global_drag_drop()
 
         if self.explorer_panel:
+            self.project_manager.projects_changed.connect(self.explorer_panel.refresh)
             self.explorer_panel.tree_widget.currentItemChanged.connect(self._on_active_project_changed)
         if self.source_control_panel:
             self.theme_changed_signal.connect(self.source_control_panel.update_icons)
@@ -203,7 +204,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
         self.view_menu.addSeparator()
         self.view_menu.addAction(dock.toggleViewAction())
-        self.project_manager.projects_changed.connect(self.explorer_panel.refresh)
+        # The connection is now done in __init__ after project_manager is created
         QTimer.singleShot(100, self.explorer_panel.refresh)
 
     def _integrate_linter_ui(self):

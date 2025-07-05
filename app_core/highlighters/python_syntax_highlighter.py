@@ -150,33 +150,39 @@ class PythonSyntaxHighlighter(QSyntaxHighlighter):
                 return
 
         # 3. Find new multi-line strings in the rest of the block
+        delimiters = [
+            (self.tri_double_quote_start, IN_TRIPLE_DOUBLE),
+            (self.tri_single_quote_start, IN_TRIPLE_SINGLE)
+        ]
+
         while start_index < len(text):
-            double_match = self.tri_double_quote_start.match(text, start_index)
-            single_match = self.tri_single_quote_start.match(text, start_index)
+            # Find the next occurring delimiter of any type with grace and simplicity.
+            next_match, next_state_to_set, next_delimiter_re = None, None, None
+            first_pos = float('inf')
 
-            # Determine which delimiter comes first
-            match_to_process, delimiter_re, state_to_set = None, None, None
-            if double_match.hasMatch() and (
-                    not single_match.hasMatch() or double_match.capturedStart() < single_match.capturedStart()):
-                match_to_process = double_match
-                delimiter_re = self.tri_double_quote_start
-                state_to_set = IN_TRIPLE_DOUBLE
-            elif single_match.hasMatch():
-                match_to_process = single_match
-                delimiter_re = self.tri_single_quote_start
-                state_to_set = IN_TRIPLE_SINGLE
-            else:
-                break  # No more delimiters
+            for delimiter_re, state_to_set in delimiters:
+                match = delimiter_re.match(text, start_index)
+                if match.hasMatch() and match.capturedStart() < first_pos:
+                    first_pos = match.capturedStart()
+                    next_match = match
+                    next_state_to_set = state_to_set
+                    next_delimiter_re = delimiter_re
+            
+            if not next_match:
+                break  # No more delimiters found in the remaining text.
 
-            start_pos = match_to_process.capturedStart()
-            end_match = delimiter_re.match(text, start_pos + match_to_process.capturedLength())
+            start_pos = next_match.capturedStart()
+            # Re-use the found delimiter regex to find its partner
+            end_match = next_delimiter_re.match(text, start_pos + next_match.capturedLength())
 
             if end_match.hasMatch():
+                # A complete story, with a beginning and an end.
                 length = end_match.capturedEnd() - start_pos
                 self.setFormat(start_pos, length, self.multiline_string_format)
                 start_index = end_match.capturedEnd()
             else:
-                self.setCurrentBlockState(state_to_set)
+                # A story left unfinished...
+                self.setCurrentBlockState(next_state_to_set)
                 self.setFormat(start_pos, len(text) - start_pos, self.multiline_string_format)
                 return
 

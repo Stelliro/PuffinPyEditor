@@ -78,12 +78,16 @@ class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
         if norm_path in self._open_projects:
             self._open_projects.remove(norm_path)
             log.info(f"Project closed: {norm_path}")
-            self.projects_changed.emit()  # NEW: Emit signal on change
 
             # If the closed project was the active one, pick a new active one
             if self.get_active_project_path() == norm_path:
                 new_active = self._open_projects[0] if self._open_projects else None
                 self.set_active_project(new_active)
+            
+            # Persist the change
+            self.save_session()
+            self.projects_changed.emit()  # NEW: Emit signal on change
+
 
     def get_open_projects(self) -> List[str]:
         """Returns the list of currently open project paths."""
@@ -95,6 +99,8 @@ class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
         if self._active_project_path != norm_path:
             self._active_project_path = norm_path
             log.info(f"Active project set to: {norm_path}")
+            # Emit signal to let UI components like completion manager know
+            self.projects_changed.emit()
 
     def get_active_project_path(self) -> Optional[str]:
         """Returns the path of the currently active project."""

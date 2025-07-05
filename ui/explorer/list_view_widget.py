@@ -1,12 +1,14 @@
 # PuffinPyEditor/ui/explorer/list_view_widget.py
 import os
 import sys
-# MODIFIED: Corrected import list (no functional change here, but good practice)
+# MODIFIED: Added imports for typing and more Qt modules for drag-and-drop
+from typing import List, Optional
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QInputDialog, QMessageBox,
                              QProxyStyle, QStyle, QApplication, QAbstractItemView, QToolButton,
                              QHBoxLayout, QTreeWidgetItemIterator)
-from PyQt6.QtGui import QPainter, QColor, QPen, QDrag, QKeyEvent, QIcon, QPaintEvent
-from PyQt6.QtCore import Qt, QFileInfo, QMimeData, QRect, QFileSystemWatcher, QTimer, QPoint, QPointF
+from PyQt6.QtGui import (QPainter, QColor, QPen, QDrag, QKeyEvent, QIcon, QPaintEvent, QDragEnterEvent, QDropEvent, QDragMoveEvent)
+from PyQt6.QtCore import (Qt, QFileInfo, QMimeData, QRect, QFileSystemWatcher, QTimer, QPoint, QPointF,
+                          QUrl)
 
 import qtawesome as qta
 
@@ -43,7 +45,27 @@ class StyledTreeView(QTreeWidget):
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+
+    def supportedDropActions(self) -> Qt.DropAction:
+        """Specifies that we support both copy and move actions."""
+        return Qt.DropAction.CopyAction | Qt.DropAction.MoveAction
+
+    def mimeData(self, items: List[QTreeWidgetItem]) -> Optional[QMimeData]:
+        """Creates the MIME data for a drag operation."""
+        if not items:
+            return None
+
+        item = items[0]
+        data = item.data(0, Qt.ItemDataRole.UserRole)
+        path = data.get('path') if data else None
+        if not path:
+            return None
+
+        mime = QMimeData()
+        mime.setData(TREE_ITEM_MIME_TYPE, path.encode('utf-8'))
+        mime.setUrls([QUrl.fromLocalFile(path)])
+        return mime
 
     def paintEvent(self, event: QPaintEvent):
         """
@@ -145,72 +167,78 @@ class StyledTreeView(QTreeWidget):
         painter.drawLine(p2, p3)
         painter.restore()
 
-    def startDrag(self, actions: Qt.DropAction):
-        """Initiates a drag operation for the current item."""
-        item = self.currentItem()
-        if not item: return
-        data = item.data(0, Qt.ItemDataRole.UserRole)
-        if not data: return
-        path = data.get('path')
-        if not path: return
-
-        mime = QMimeData()
-        mime.setData(TREE_ITEM_MIME_TYPE, path.encode('utf-8'))
-        drag = QDrag(self)
-        drag.setMimeData(mime)
-        drag.exec(Qt.DropAction.MoveAction)
-
-    def dragMoveEvent(self, event: 'QDragMoveEvent'):
-        """Determines if a drop is allowed at the current position."""
-        source_bytes = event.mimeData().data(TREE_ITEM_MIME_TYPE)
-        if not source_bytes:
-            super().dragMoveEvent(event)
-            return
-
-        target_item = self.itemAt(event.position().toPoint())
-        if not target_item:
-            event.ignore()
-            return
-
-        target_data = target_item.data(0, Qt.ItemDataRole.UserRole)
-        if not target_data:
-            event.ignore()
-            return
-
-        source_path = source_bytes.decode('utf-8')
-        target_path = target_data.get('path')
-
-        # Determine the drop destination directory
-        dest_dir = target_path if target_data.get('is_dir') else os.path.dirname(target_path)
-
-        # Prevent dropping an item onto itself or into its own subdirectory
-        is_self_drop = os.path.normpath(source_path) == os.path.normpath(dest_dir)
-        is_child_drop = os.path.isdir(source_path) and os.path.normpath(dest_dir).startswith(
-            os.path.normpath(source_path) + os.sep)
-
-        if not is_self_drop and not is_child_drop:
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        """Accepts drags if they contain our custom MIME type."""
+        if event.mimeData().hasFormat(TREE_ITEM_MIME_TYPE):
             event.acceptProposedAction()
         else:
-            event.ignore()
+            super().dragEnterEvent(event)
 
-    def dropEvent(self, event: 'QDropEvent'):
-        """Handles the drop of an item."""
-        source_bytes = event.mimeData().data(TREE_ITEM_MIME_TYPE)
-        if not source_bytes:
-            super().dropEvent(event)
+    def dragMoveEvent(self, event: QDragMoveEvent):
+        """Determines if a drop is allowed at the current cursor position."""
+        if not event.mimeData().hasFormat(TREE_ITEM_MIME_TYPE):
+            event.ignore()
             return
 
-        source_path = source_bytes.decode('utf-8')
         target_item = self.itemAt(event.position().toPoint())
         if not target_item:
             event.ignore()
             return
 
+        source_path = event.mimeData().data(TREE_ITEM_MIME_TYPE).data().decode('utf-8')
         target_data = target_item.data(0, Qt.ItemDataRole.UserRole)
-        dest_dir = target_data.get('path') if target_data.get('is_dir') else os.path.dirname(target_data.get('path'))
+        target_path = target_data.get('path') if target_data else None
 
-        self.parent_view._perform_file_operation(self.file_handler.move_item, source_path, dest_dir)
-        event.accept()
+        if not target_path:
+            event.ignore()
+            return
+            
+        if os.path.normpath(source_path) == os.path.normpath(target_path):
+            event.ignore()
+            return
+
+        dest_dir = target_path if target_data.get('is_dir') else os.path.dirname(target_path)
+
+        if os.path.isdir(source_path) and os.path.normpath(dest_dir).startswith(os.path.normpath(source_path) + os.sep):
+            event.ignore()
+            return
+
+        event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent):
+        """Handles the drop of an item."""
+        if not event.mimeData().hasFormat(TREE_ITEM_MIME_TYPE):
+            event.ignore()
+            return
+
+        source_path = event.mimeData().data(TREE_ITEM_MIME_TYPE).data().decode('utf-8')
+        target_item = self.itemAt(event.position().toPoint())
+
+        if not target_item:
+            event.ignore()
+            return
+
+        target_data = target_item.data(0, Qt.ItemDataRole.UserRole)
+        target_path = target_data.get('path') if target_data else None
+        if not target_path:
+            event.ignore()
+            return
+
+        dest_dir = target_path if target_data.get('is_dir') else os.path.dirname(target_path)
+
+        is_copy = (event.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier) == Qt.KeyboardModifier.ControlModifier
+        
+        operation = self.file_handler.copy_item_to_dest if is_copy else self.file_handler.move_item
+        
+        # MODIFIED: Call the file operation and then explicitly refresh the UI.
+        success, new_path = self.parent_view._perform_file_operation(operation, source_path, dest_dir, return_result=True)
+        if success:
+            log.info("Drag-and-drop operation successful, refreshing tree view.")
+            self.parent_view.refresh()
+            # After refreshing, try to select the newly moved/copied item
+            QTimer.singleShot(150, lambda p=new_path: self.parent_view._select_and_scroll_to_path(p))
+            
+        event.acceptProposedAction()
 
     def keyPressEvent(self, event: QKeyEvent):
         """Handles key presses, like the Delete key."""
@@ -310,8 +338,7 @@ class FileSystemListView(QWidget):
 
     def get_expanded_paths(self):
         expanded_set = set()
-        # MODIFIED: Changed iterator flag to the correct syntax
-        iterator = QTreeWidgetItemIterator(self.tree_widget, QTreeWidgetItemIterator.All)
+        iterator = QTreeWidgetItemIterator(self.tree_widget, QTreeWidgetItemIterator.IteratorFlag.All)
         while iterator.value():
             item = iterator.value()
             if item.isExpanded():
@@ -523,14 +550,19 @@ class FileSystemListView(QWidget):
         if not path: return
         show_project_context_menu(self, position, path, is_dir)
 
-    def _perform_file_operation(self, operation, *args):
+    def _perform_file_operation(self, operation, *args, return_result=False):
         self._is_programmatic_change = True
+        success, message = False, "Operation cancelled by user."
         try:
-            success, message = operation(*args)
-            if not success:
+            result = operation(*args)
+            success, message = result if isinstance(result, tuple) else (result, None)
+            if not success and message:
                 QMessageBox.critical(self, "Operation Failed", message)
         finally:
             QTimer.singleShot(200, lambda: setattr(self, '_is_programmatic_change', False))
+        
+        if return_result:
+            return success, message
 
     def _action_new_file(self, target_dir: str):
         filename, ok = QInputDialog.getText(self, "New File", "Enter file name:")

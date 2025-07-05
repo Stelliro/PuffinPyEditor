@@ -145,6 +145,32 @@ class FileHandler(QObject):
         try: item_type = 'folder' if os.path.isdir(src_path) else 'file'; shutil.move(src_path, dest_path); log.info(f"Moved '{src_path}' to '{dest_path}'"); self.item_renamed.emit(item_type, src_path, dest_path); return True, dest_path
         except (OSError, shutil.Error) as e: log.error(f"Move operation failed: {e}", exc_info=True); return False, f"Move operation failed: {e}"
 
+    # NEW: Added a dedicated copy method for drag-and-drop
+    def copy_item_to_dest(self, src_path: str, dest_dir: str) -> Tuple[bool, Optional[str]]:
+        """Copies a file or folder to a destination directory."""
+        if not os.path.exists(src_path):
+            return False, "Source path does not exist."
+        if not os.path.isdir(dest_dir):
+            return False, "Destination must be a folder."
+
+        dest_path = os.path.join(dest_dir, os.path.basename(src_path))
+        if os.path.exists(dest_path):
+            return False, f"'{os.path.basename(src_path)}' already exists in the destination."
+
+        try:
+            item_type = 'folder' if os.path.isdir(src_path) else 'file'
+            if item_type == 'folder':
+                shutil.copytree(src_path, dest_path)
+            else:  # it's a file
+                shutil.copy2(src_path, dest_path)
+
+            log.info(f"Copied '{src_path}' to '{dest_path}'")
+            self.item_created.emit(item_type, dest_path)
+            return True, dest_path
+        except (OSError, shutil.Error) as e:
+            log.error(f"Copy operation failed: {e}", exc_info=True)
+            return False, f"Copy operation failed: {e}"
+
     def get_clipboard_status(self): return self._internal_clipboard.get("operation")
     def _add_to_recent_files(self, filepath):
         if not filepath: return

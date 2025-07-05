@@ -172,32 +172,120 @@ class ThemeManager:
         if not app or not self.current_theme_data: return
         colors = self.current_theme_data.get("colors", {})
 
-        def c(key: str, fb: str) -> str:
-            return colors.get(key, fb)
+        def c(key: str, fb: str) -> str: return colors.get(key, fb)
 
         def adj(h: str, f: int) -> str:
-            c = QColor(h)
-            # Use lighter for light themes and darker for dark themes if factor > 100
-            # A bit of a simplification, but good enough.
-            if self.current_theme_data.get('type', 'dark') == 'light':
-                return c.darker(f).name() if f > 100 else c.lighter(f).name()
-            return c.lighter(f).name() if f > 100 else c.darker(f).name()
+            c_obj = QColor(h)
+            is_light_theme = self.current_theme_data.get('type', 'dark') == 'light'
+            return c_obj.darker(f).name() if f > 100 and is_light_theme else c_obj.lighter(f).name()
 
-        ac, wb, bb, bf = c('accent', '#83c092'), c('window.background', '#2f383e'), c('button.background',
-                                                                                      '#424d53'), c('button.foreground',
-                                                                                                    '#d3c6aa')
-        ib, igf, ibd, sb = c('input.background', '#3a4145'), c('input.foreground', '#d3c6aa'), c('input.border',
-                                                                                                 '#5f6c6d'), c(
-            'sidebar.background', '#2a3338')
+        ac, wb, bb, bf, ib, igf, ibd, sb = (
+            c('accent', '#83c092'), c('window.background', '#2f383e'),
+            c('button.background', '#424d53'), c('button.foreground', '#d3c6aa'),
+            c('input.background', '#3a4145'), c('editor.foreground', '#d3c6aa'),
+            c('input.border', '#5f6c6d'), c('sidebar.background', '#2a3338')
+        )
 
-        # *** THIS IS THE CORRECTED LINE ***
-        # Use the accent color 'ac' for the arrows to ensure they are always themed correctly.
-        arrow_color = c('editor.foreground', '#d3c6aa')  # Use a high-contrast color for arrows
-        ca, su, sd = get_arrow_svg_uri('down', arrow_color), get_arrow_svg_uri('up', arrow_color), get_arrow_svg_uri(
-            'down', arrow_color)
+        arrow_color = c('editor.foreground', '#d3c6aa')
+        combo_arrow, spin_up, spin_down = (
+            get_arrow_svg_uri('down', arrow_color),
+            get_arrow_svg_uri('up', arrow_color),
+            get_arrow_svg_uri('down', arrow_color)
+        )
 
-        ss = f"""QWidget{{background-color:{wb};color:{igf};border:none;}}QMainWindow,QDialog{{background-color:{wb};}}QPushButton{{background-color:{bb};color:{bf};border:1px solid {ibd};border-radius:4px;padding:6px 12px;min-width:80px;}}QPushButton:hover{{background-color:{adj(bb, 115)};border-color:{ac};}}QPushButton:pressed{{background-color:{adj(bb, 95)};}}QPushButton:disabled{{background-color:{adj(bb, 105)};color:{c('editorGutter.foreground', '#888')};border-color:{adj(ibd, 110)};}}QSplitter::handle{{background-color:{sb};width:1px;image:none;}}QSplitter::handle:hover{{background-color:{ac};}}QMenuBar{{background-color:{adj(wb, 105)};border-bottom:1px solid {ibd};}}QMenuBar::item{{padding:6px 12px;}}QMenuBar::item:selected{{background-color:{ac};color:{c('button.foreground', '#000')};}}QMenu{{background-color:{c('menu.background', '#3a4145')};border:1px solid {ibd};padding:4px;}}QMenu::item{{padding:6px 24px;}}QMenu::item:selected{{background-color:{ac};color:{c('button.foreground', '#000')};}}QTabWidget::pane{{border:none;}}QTabBar::tab{{background:transparent;color:{c('tab.inactiveForeground', '#5f6c6d')};padding:8px 15px;border:none;border-bottom:2px solid transparent;}}QTabBar::tab:hover{{background:{adj(wb, 110)};}}QTabBar::tab:selected{{color:{c('tab.activeForeground', '#d3c6aa')};border-bottom:2px solid {ac};}}QToolButton{{background:transparent;border:none;border-radius:4px;padding:4px;}}QToolButton:hover{{background-color:{adj(bb, 120)};}}QAbstractItemView{{background-color:{sb};outline:0;}}QTreeView,QListWidget,QTableWidget,QTreeWidget{{alternate-background-color:{adj(sb, 103)};}}QTreeView::item:hover,QListWidget::item:hover{{background-color:{adj(sb, 120)};}}QTreeView::item:selected,QListWidget::item:selected{{background-color:{ac};color:{c('button.foreground', '#000')};}}QHeaderView::section{{background-color:{adj(sb, 110)};padding:4px;border:1px solid {wb};}}QDockWidget::title{{background-color:{adj(wb, 105)};text-align:left;padding:5px;border-bottom:1px solid {ibd};}}QGroupBox{{font-weight:bold;border:1px solid {adj(ibd, 115)};border-radius:6px;margin-top:1em;}}QGroupBox::title{{subcontrol-origin:margin;left:10px;padding:0 4px;color:{ac};background-color:{wb};}}QLineEdit,QTextEdit,QPlainTextEdit,QAbstractSpinBox,QComboBox{{background-color:{ib};border:1px solid {ibd};border-radius:4px;padding:5px;}}QLineEdit:focus,QAbstractSpinBox:focus,QComboBox:focus,QTextEdit:focus,QPlainTextEdit:focus{{border:1px solid {ac};}}QComboBox::drop-down{{subcontrol-origin:padding;subcontrol-position:top right;width:20px;border-left:1px solid {ibd};}}QComboBox::down-arrow{{image:url({ca});width:8px;height:8px;}}QSpinBox{{padding-right:22px;}}QSpinBox::up-button,QSpinBox::down-button{{subcontrol-origin:border;width:22px;background-color:transparent;border-left:1px solid {ibd};}}QSpinBox::up-button:hover,QSpinBox::down-button:hover{{background-color:{adj(ib, 120)};}}QSpinBox::up-button{{subcontrol-position:top right;}}QSpinBox::down-button{{subcontrol-position:bottom right;}}QSpinBox::up-arrow{{image:url({su});width:8px;height:8px;}}QSpinBox::down-arrow{{image:url({sd});width:8px;height:8px;}}QStatusBar{{background-color:{c('statusbar.background', '#282f34')};border-top:1px solid {ibd};color:{c('statusbar.foreground', '#d3c6aa')};}}QScrollBar:vertical{{width:10px;}}QScrollBar:horizontal{{height:10px;}}QScrollBar::handle{{background:{c('scrollbar.handle', '#424d53')};border-radius:5px;min-height:20px;}}QScrollBar::handle:hover{{background:{c('scrollbar.handleHover', '#545e62')};}}QScrollBar::add-line,QScrollBar::sub-line{{height:0px;width:0px;}}QScrollBar::add-page,QScrollBar::sub-page{{background:none;}}"""
-        app.setStyleSheet(ss)
+        stylesheet = f"""
+            QWidget {{ background-color: {wb}; color: {igf}; border: none; }}
+            QMainWindow, QDialog {{ background-color: {wb}; }}
+            QSplitter::handle {{ background-color: {sb}; width: 1px; image: none; }}
+            QSplitter::handle:hover {{ background-color: {ac}; }}
 
+            /* Buttons */
+            QPushButton {{
+                background-color: {bb}; color: {bf}; border: 1px solid {ibd};
+                border-radius: 4px; padding: 6px 12px; min-width: 80px;
+            }}
+            QPushButton:hover {{ background-color: {adj(bb, 115)}; border-color: {ac}; }}
+            QPushButton:pressed {{ background-color: {adj(bb, 95)}; }}
+            QPushButton:disabled {{
+                background-color: {adj(bb, 105)}; color: {c('editorGutter.foreground', '#888')};
+                border-color: {adj(ibd, 110)};
+            }}
+            QToolButton {{ background: transparent; border: none; border-radius: 4px; padding: 4px; }}
+            QToolButton:hover {{ background-color: {adj(bb, 120)}; }}
+
+            /* Menus and Bars */
+            QMenuBar {{ background-color: {adj(wb, 105)}; border-bottom: 1px solid {ibd}; }}
+            QMenuBar::item {{ padding: 6px 12px; }}
+            QMenuBar::item:selected {{ background-color: {ac}; color: {c('button.foreground', '#000')}; }}
+            QMenu {{ background-color: {c('menu.background', '#3a4145')}; border: 1px solid {ibd}; padding: 4px; }}
+            QMenu::item {{ padding: 6px 24px; }}
+            QMenu::item:selected {{ background-color: {ac}; color: {c('button.foreground', '#000')}; }}
+            QStatusBar {{
+                background-color: {c('statusbar.background', '#282f34')}; border-top: 1px solid {ibd};
+                color: {c('statusbar.foreground', '#d3c6aa')};
+            }}
+
+            /* Tabs */
+            QTabWidget::pane {{ border: none; }}
+            QTabBar::tab {{
+                background: transparent; color: {c('tab.inactiveForeground', '#5f6c6d')};
+                padding: 8px 15px; border: none; border-bottom: 2px solid transparent;
+            }}
+            QTabBar::tab:hover {{ background: {adj(wb, 110)}; }}
+            QTabBar::tab:selected {{ color: {c('tab.activeForeground', '#d3c6aa')}; border-bottom: 2px solid {ac}; }}
+
+            /* Inputs */
+            QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox {{
+                background-color: {ib}; border: 1px solid {ibd}; border-radius: 4px; padding: 5px;
+            }}
+            QLineEdit:focus, QAbstractSpinBox:focus, QComboBox:focus, QTextEdit:focus, QPlainTextEdit:focus {{
+                border: 1px solid {ac};
+            }}
+
+            /* Combo & Spin Box Arrows */
+            QComboBox::drop-down {{
+                subcontrol-origin: padding; subcontrol-position: top right;
+                width: 20px; border-left: 1px solid {ibd};
+            }}
+            QComboBox::down-arrow {{ image: url({combo_arrow}); width: 8px; height: 8px; }}
+            QSpinBox {{ padding-right: 22px; }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                subcontrol-origin: border; width: 22px; background-color: transparent;
+                border-left: 1px solid {ibd};
+            }}
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ background-color: {adj(ib, 120)}; }}
+            QSpinBox::up-button {{ subcontrol-position: top right; }}
+            QSpinBox::down-button {{ subcontrol-position: bottom right; }}
+            QSpinBox::up-arrow {{ image: url({spin_up}); width: 8px; height: 8px; }}
+            QSpinBox::down-arrow {{ image: url({spin_down}); width: 8px; height: 8px; }}
+
+            /* Item Views */
+            QAbstractItemView {{ background-color: {sb}; outline: 0; }}
+            QTreeView, QListWidget, QTableWidget, QTreeWidget {{ alternate-background-color: {adj(sb, 103)}; }}
+            QTreeView::item:hover, QListWidget::item:hover {{ background-color: {adj(sb, 120)}; }}
+            QTreeView::item:selected, QListWidget::item:selected {{ background-color: {ac}; color: {c('button.foreground', '#000')}; }}
+            QHeaderView::section {{ background-color: {adj(sb, 110)}; padding: 4px; border: 1px solid {wb}; }}
+            QDockWidget::title {{
+                background-color: {adj(wb, 105)}; text-align: left; padding: 5px;
+                border-bottom: 1px solid {ibd};
+            }}
+            QGroupBox {{
+                font-weight: bold; border: 1px solid {adj(ibd, 115)};
+                border-radius: 6px; margin-top: 1em;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin; left: 10px; padding: 0 4px;
+                color: {ac}; background-color: {wb};
+            }}
+
+            /* Scrollbar */
+            QScrollBar:vertical {{ width: 10px; }}
+            QScrollBar:horizontal {{ height: 10px; }}
+            QScrollBar::handle {{ background: {c('scrollbar.handle', '#424d53')}; border-radius: 5px; min-height: 20px; }}
+            QScrollBar::handle:hover {{ background: {c('scrollbar.handleHover', '#545e62')}; }}
+            QScrollBar::add-line, QScrollBar::sub-line {{ height: 0px; width: 0px; }}
+            QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
+        """
+        app.setStyleSheet(stylesheet)
 
 theme_manager = ThemeManager()

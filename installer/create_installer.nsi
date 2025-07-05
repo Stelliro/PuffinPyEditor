@@ -1,114 +1,148 @@
 ; PuffinPyEditor NSIS Installer Script
-; ===================================
-; Version 1.6 - With Modern UI & Corrected Section Defines
+; Version 3.0 - Modular Components
 
+; Use variables passed from the command line by build.py
+!ifndef APP_NAME
+  !error "APP_NAME must be defined on the command line!"
+!endif
+!ifndef APP_VERSION
+  !error "APP_VERSION must be defined on the command line!"
+!endif
+!ifndef SRC_DIR
+  !error "SRC_DIR must be defined on the command line!"
+!endif
+!ifndef OUT_FILE
+  !error "OUT_FILE must be defined on the command line!"
+!endif
+
+;--------------------------------
+; Includes
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
-; --- Application & System Info ---
-!define APP_NAME "PuffinPyEditor"
-!define EXE_NAME "PuffinPyEditor.exe"
-!define TRAY_EXE_NAME "PuffinPyTray.exe"
-!define TRAY_LNK_NAME "PuffinPyEditor Tray.lnk"
-!define COMPANY_NAME "PuffinPyEditorProject"
-!define REG_KEY "Software\${COMPANY_NAME}\${APP_NAME}"
-!define LICENSE_FILE "..\LICENSE.md"
+;--------------------------------
+; General
+Name "${APP_NAME}"
+OutFile "${OUT_FILE}"
+InstallDir "$PROGRAMFILES64\${APP_NAME}"
+InstallDirRegKey HKLM "Software\${APP_NAME}" "Install_Dir"
+RequestExecutionLevel admin
+SetCompressor lzma
 
-; --- Section Identifiers (using unique strings) ---
-!define SEC_CORE "CoreFiles"
-!define SEC_STARTMENU "StartMenuShortcut"
-!define SEC_DESKTOP "DesktopShortcut"
-!define SEC_TRAY "StartupTray"
-
-; --- Modern UI Configuration ---
+;--------------------------------
+; Interface Settings
+!define MUI_ABORTWARNING
 !define MUI_ICON "assets\PuffinPyEditor.ico"
 !define MUI_UNICON "assets\PuffinPyEditor.ico"
-!define MUI_WELCOMEFINISHPAGE_BITMAP "assets\welcome.bmp"
 !define MUI_HEADERIMAGE
 !define MUI_HEADERIMAGE_BITMAP "assets\PuffinPyEditor_Header.bmp"
-!define MUI_ABORTWARNING
+!define MUI_WELCOMEFINISHPAGE_BITMAP "assets\welcome.bmp"
 
-; --- Pages ---
+;--------------------------------
+; Pages
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "${LICENSE_FILE}"
+!insertmacro MUI_PAGE_LICENSE "..\LICENSE.md"
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
 
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
 
-; --- Language ---
+;--------------------------------
+; Languages
 !insertmacro MUI_LANGUAGE "English"
 
-; --- Descriptions for Components Page ---
+;--------------------------------
+; Installer Sections
+
+Section "PuffinPyEditor Core" SecPuffinPy
+  SectionIn RO ; Read-only, this section is required
+  SetOutPath $INSTDIR
+
+  ; Core executables and libraries
+  File "${SRC_DIR}\*.exe"
+  File "${SRC_DIR}\*.dll"
+  File "${SRC_DIR}\*.pyd"
+  File "${SRC_DIR}\base_library.zip"
+  
+  ; Required directories
+  File /r "${SRC_DIR}\app_core"
+  File /r "${SRC_DIR}\plugins"
+  File /r "${SRC_DIR}\ui"
+  File /r "${SRC_DIR}\utils"
+  
+  ; Required assets
+  File /r "${SRC_DIR}\assets\fonts"
+  SetOutPath "$INSTDIR\assets\themes"
+  File "${SRC_DIR}\assets\themes\icon_colors.json"
+  
+  SetOutPath $INSTDIR
+  ; Root files
+  File "${SRC_DIR}\LICENSE.md"
+  File "${SRC_DIR}\README.md"
+  File "${SRC_DIR}\VERSION.txt"
+  
+  ; Write registry keys for Add/Remove Programs
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayName" "${APP_NAME}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "UninstallString" '"$INSTDIR\uninstall.exe"'
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayVersion" "${APP_VERSION}"
+  WriteRegStr HKLM "Software\${APP_NAME}" "Install_Dir" "$INSTDIR"
+
+  ; Write the uninstaller
+  WriteUninstaller "$INSTDIR\uninstall.exe"
+
+  ; Create Start Menu shortcuts
+  CreateDirectory "$SMPROGRAMS\${APP_NAME}"
+  CreateShortCut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\PuffinPyEditor.exe"
+  CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\PuffinPyEditor.exe"
+SectionEnd
+
+Section "Core Debug Tools" SecDebugTools
+  SetOutPath $INSTDIR
+  File /r "${SRC_DIR}\core_debug_tools"
+SectionEnd
+
+Section "AI Prompt Templates" SecAIPrompts
+  SetOutPath "$INSTDIR\assets"
+  File /r "${SRC_DIR}\assets\prompts"
+SectionEnd
+
+Section "Additional Custom Themes" SecCustomThemes
+  SetOutPath "$INSTDIR\assets\themes"
+  File "${SRC_DIR}\assets\themes\custom_themes.json"
+SectionEnd
+
+; Section descriptions for the components page
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
-    !insertmacro MUI_DESCRIPTION_TEXT ${SEC_CORE} "Installs the main application files."
-    !insertmacro MUI_DESCRIPTION_TEXT ${SEC_STARTMENU} "Creates a shortcut in the Start Menu."
-    !insertmacro MUI_DESCRIPTION_TEXT ${SEC_DESKTOP} "Creates a shortcut on the Desktop."
-    !insertmacro MUI_DESCRIPTION_TEXT ${SEC_TRAY} "Installs the background tray application for quick launching."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecPuffinPy} "The core application files. Required for the editor to run."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecDebugTools} "Developer tools for debugging the editor and its plugins."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecAIPrompts} "A collection of prompt templates for various AI-assisted tasks."
+  !insertmacro MUI_DESCRIPTION_TEXT ${SecCustomThemes} "A set of extra visual themes created by the community."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
 
-; ===================================================================
-;   INSTALLATION SECTION
-; ===================================================================
-
-Section "PuffinPyEditor (required)" ${SEC_CORE}
-    SectionIn RO ; Read-only, user can't uncheck
-    SetOutPath $INSTDIR
-    File /r "..\dist\PuffinPyEditor\*"
-    
-    ; Create uninstaller
-    WriteUninstaller "$INSTDIR\uninstall.exe"
-    
-    ; Write registry keys for Add/Remove Programs
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayName" "${APP_NAME}"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "UninstallString" '"$INSTDIR\uninstall.exe"'
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayIcon" '"$INSTDIR\${EXE_NAME}"'
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayVersion" "${VERSION}"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "Publisher" "${COMPANY_NAME}"
-    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "NoModify" 1
-    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "NoRepair" 1
-SectionEnd
-
-Section "Start Menu Shortcut" ${SEC_STARTMENU}
-    CreateDirectory "$SMPROGRAMS\${APP_NAME}"
-    CreateShortCut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\${EXE_NAME}"
-    CreateShortCut "$SMPROGRAMS\${APP_NAME}\Uninstall ${APP_NAME}.lnk" "$INSTDIR\uninstall.exe"
-SectionEnd
-
-Section "Desktop Shortcut" ${SEC_DESKTOP}
-    CreateShortCut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\${EXE_NAME}"
-SectionEnd
-
-Section "Launch on Startup (Tray App)" ${SEC_TRAY}
-    CreateShortCut "$STARTUP\${TRAY_LNK_NAME}" "$INSTDIR\${TRAY_EXE_NAME}"
-SectionEnd
-
-; ===================================================================
-;   UNINSTALLATION SECTION
-; ===================================================================
-
+;--------------------------------
+; Uninstaller Section
 Section "Uninstall"
-    ; Remove files
-    Delete "$INSTDIR\*.*"
-    RMDir /r "$INSTDIR\assets"
-    RMDir /r "$INSTDIR\plugins"
-    RMDir /r "$INSTDIR\core_debug_tools"
-    RMDir /r "$INSTDIR\ui"
-    RMDir /r "$INSTDIR\utils"
-    RMDir /r "$INSTDIR\app_core"
+  ; Remove all files and directories
+  Delete "$INSTDIR\*.*"
+  RmDir /r "$INSTDIR\app_core"
+  RmDir /r "$INSTDIR\plugins"
+  RmDir /r "$INSTDIR\ui"
+  RmDir /r "$INSTDIR\utils"
+  RmDir /r "$INSTDIR\assets"
+  RmDir /r "$INSTDIR\core_debug_tools"
 
-    ; Remove shortcuts
-    Delete "$SMPROGRAMS\${APP_NAME}\*.*"
-    RMDir "$SMPROGRAMS\${APP_NAME}"
-    Delete "$DESKTOP\${APP_NAME}.lnk"
-    Delete "$STARTUP\${TRAY_LNK_NAME}"
-    
-    ; Remove directory
-    RMDir $INSTDIR
-    
-    ; Remove registry keys
-    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
-    DeleteRegKey HKCU "${REG_KEY}"
+  ; Remove shortcuts
+  Delete "$SMPROGRAMS\${APP_NAME}\*.*"
+  Delete "$DESKTOP\${APP_NAME}.lnk"
+  RmDir /r "$SMPROGRAMS\${APP_NAME}"
+  
+  ; Remove main install directory if empty
+  RmDir "$INSTDIR"
+  
+  ; Remove registry keys
+  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
+  DeleteRegKey HKLM "Software\${APP_NAME}"
 SectionEnd
