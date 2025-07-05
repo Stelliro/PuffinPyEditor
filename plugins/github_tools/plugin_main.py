@@ -103,7 +103,7 @@ class GitHubToolsPlugin:
 
     def ensure_git_identity(self, project_path: str, log_to_dialog=False) -> bool:
         """
-        Ensures the local repo is configured to use an email associated with the
+        FIX: Ensures the local repo is configured to use an email associated with the
         logged-in GitHub account, which is required for contributions to be counted.
         It will overwrite a misconfigured local email.
 
@@ -164,6 +164,25 @@ class GitHubToolsPlugin:
         self._create_release(project_path)
 
     def _create_release(self, project_path):
+        # FIX: Add a pre-flight check to ensure the repository is in a clean state before starting.
+        try:
+            repo = git.Repo(project_path)
+            if repo.is_dirty(untracked_files=False):
+                self.api.show_message(
+                    "critical", "Uncommitted Changes",
+                    "Your repository has uncommitted changes. Please commit or stash them before creating a release."
+                )
+                return
+            if os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD')):
+                self.api.show_message(
+                    "critical", "Unresolved Merge",
+                    "Your repository has an unresolved merge conflict. Please resolve the conflict, commit the changes, or abort the merge before creating a release."
+                )
+                return
+        except Exception as e:
+            self.api.show_message("critical", "Repository Error", f"Could not check repository status: {e}")
+            return
+
         dialog = NewReleaseDialog(project_path, self.git_manager, self.main_window)
         if not dialog.exec():
             self.api.show_status_message("Release cancelled.", 3000)
@@ -177,6 +196,7 @@ class GitHubToolsPlugin:
             return
 
         try:
+            # Re-get repo object in case something changed, though unlikely.
             repo = git.Repo(project_path)
             if not repo.remotes: self._on_release_step_failed("This project has no remote repository."); return
             remote_url = repo.remotes.origin.url
@@ -190,7 +210,7 @@ class GitHubToolsPlugin:
 
         self._release_state = {'dialog_data': dialog.get_release_data(), 'project_path': project_path, 'owner': owner,
                                'repo_name': repo_name, 'step': None}
-        self._advance_release_state("BUMP_VERSION_COMMIT")
+        self._advance_release_state("PULL_CHANGES")
 
     def _advance_release_state(self, next_step):
         self._release_state['step'] = next_step
@@ -201,19 +221,24 @@ class GitHubToolsPlugin:
         if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(True, f"Step: {step_title}...")
         if self.progress_dialog: self.progress_dialog.set_step(step_title)
 
-        # Re-ordered workflow: Commit -> Push Commit -> Tag -> Push Tag -> Release
-        try:
-            repo = git.Repo(project_path)
-            with repo.config_reader() as cr:
-                name = cr.get_value('user', 'name')
-                email = cr.get_value('user', 'email')
-            author = Actor(name, email)
-            self._release_state['author'] = author # Store for later steps
-        except Exception as e:
-            self._on_release_step_failed(f"Could not read Git author info: {e}")
-            return
+        author = self._release_state.get('author')
+        if not author:
+            try:
+                repo = git.Repo(project_path)
+                with repo.config_reader() as cr:
+                    name = cr.get_value('user', 'name')
+                    email = cr.get_value('user', 'email')
+                author = Actor(name, email)
+                self._release_state['author'] = author
+            except Exception as e:
+                self._on_release_step_failed(f"Could not read Git author info: {e}")
+                return
 
-        if step == "BUMP_VERSION_COMMIT":
+        if step == "PULL_CHANGES":
+            self.git_manager.git_success.connect(self._on_release_step_succeeded)
+            self.git_manager.git_error.connect(self._on_release_step_failed)
+            self.git_manager.pull(project_path)
+        elif step == "BUMP_VERSION_COMMIT":
             if not versioning.write_new_version(dialog_data['tag']):
                 self._on_release_step_failed("Failed to write new version to VERSION.txt.")
                 return
@@ -255,7 +280,9 @@ class GitHubToolsPlugin:
         self._log_to_dialog(f"SUCCESS on step '{step}': {msg}")
         
         # New logical flow
-        if step == "BUMP_VERSION_COMMIT":
+        if step == "PULL_CHANGES":
+            self._advance_release_state("BUMP_VERSION_COMMIT")
+        elif step == "BUMP_VERSION_COMMIT":
             self._advance_release_state("PUSH_MAIN_BRANCH")
         elif step == "PUSH_MAIN_BRANCH":
             self._advance_release_state("CREATE_TAG")
@@ -347,7 +374,6 @@ class GitHubToolsPlugin:
         project_path = self._release_state['project_path']
         
         if dialog_data.get("build_installer"):
-            # THE FIX: Look for the installer in the correct top-level /dist directory
             dist_path = os.path.join(project_path, "dist")
             version_str = dialog_data['tag'].lstrip('v')
             installer_name = f"PuffinPyEditor_v{version_str}_Setup.exe"
@@ -365,7 +391,6 @@ class GitHubToolsPlugin:
         try:
             temp_zip_dir = tempfile.mkdtemp()
             self._release_state['temp_dir'] = temp_zip_dir
-            # THE FIX: Define zip_name and zip_path separately to fix UnboundLocalError
             zip_name = f"{repo_name}-{dialog_data['tag']}.zip"
             zip_path = os.path.join(temp_zip_dir, zip_name)
 
