@@ -19,20 +19,6 @@ class GitWorker(QObject):
     operation_success = pyqtSignal(str, dict)
     git_config_ready = pyqtSignal(str, str)
 
-    def _get_author(self, repo: Repo) -> Optional[git.Actor]:
-        """Reads git config and returns a git.Actor. Emits error if missing."""
-        try:
-            with repo.config_reader() as cr:
-                name = cr.get_value('user', 'name')
-                email = cr.get_value('user', 'email')
-            return git.Actor(name, email)
-        except (configparser.NoSectionError, configparser.NoOptionError):
-            self.error_occurred.emit(
-                "Git user config is missing. Please set it in "
-                "Preferences > Source Control."
-            )
-            return None
-
     def get_git_config(self):
         """Reads the global Git user configuration."""
         try:
@@ -186,34 +172,19 @@ class GitWorker(QObject):
                 msg = f"Clone failed: {e}"
             self.error_occurred.emit(msg)
 
-    def create_tag(self, repo_path: str, tag: str, title: str):
+    def create_tag(self, repo_path: str, tag: str, title: str, author: git.Actor):
         try:
             repo = Repo(repo_path)
-            author = self._get_author(repo)
-            if not author:
-                return
-
-            # If there are no commits, create a sensible initial one.
             if not repo.head.is_valid():
                 log.info("No commits found. Creating initial commit.")
                 gitignore_path = os.path.join(repo_path, ".gitignore")
-                
-                # Create a default .gitignore if one doesn't already exist
                 if not os.path.exists(gitignore_path):
                     with open(gitignore_path, 'w', encoding='utf-8') as f:
                         f.write("# Python\n__pycache__/\n*.pyc\n\n# Env\n.env\nvenv/\n.venv/\n\n# Build\nbuild/\ndist/\n*.egg-info/\n")
-                    log.info(f"Created default .gitignore at {gitignore_path}")
-                
-                # Stage all changes (including the new .gitignore if created)
                 repo.git.add(A=True)
-                
-                # Only commit if there's something to commit
                 if repo.is_dirty(untracked_files=True):
                     repo.index.commit("Initial commit", author=author, committer=author)
-                    log.info("Successfully created initial commit.")
                 else:
-                    # This case can happen if .gitignore already existed and was tracked.
-                    # If there's truly nothing to commit, we can't create a tag.
                     self.error_occurred.emit("Cannot tag an empty project with no changes to commit.")
                     return
 
@@ -247,9 +218,11 @@ class GitWorker(QObject):
     def publish_repo(self, path: str, url: str):
         try:
             repo = Repo.init(path)
-            author = self._get_author(repo)
-            if not author:
-                return
+            with repo.config_reader() as cr:
+                name = cr.get_value('user', 'name')
+                email = cr.get_value('user', 'email')
+            author = git.Actor(name, email)
+
             repo.git.branch('-M', 'main')
             if (repo.is_dirty(untracked_files=True) and
                     not repo.head.is_valid()):
@@ -265,7 +238,7 @@ class GitWorker(QObject):
             self.operation_success.emit(
                 f"Successfully published to {url}", {'repo_path': path}
             )
-        except GitCommandError as e:
+        except (GitCommandError, configparser.Error) as e:
             log.error(f"Publish failed: {e}", exc_info=True)
             self.error_occurred.emit(f"Publish failed: {e}")
 
@@ -287,9 +260,11 @@ class GitWorker(QObject):
                 repo.git.reset('--soft', f'origin/{branch_name}')
             if (repo.is_dirty(untracked_files=True) and
                     not repo.head.is_valid()):
-                author = self._get_author(repo)
-                if not author:
-                    return
+                with repo.config_reader() as cr:
+                    name = cr.get_value('user', 'name')
+                    email = cr.get_value('user', 'email')
+                author = git.Actor(name, email)
+
                 repo.git.add(A=True)
                 repo.index.commit(
                     "Initial commit after linking to remote",
@@ -298,7 +273,7 @@ class GitWorker(QObject):
             self.operation_success.emit(
                 f"Successfully linked to {remote_url}", {}
             )
-        except GitCommandError as e:
+        except (GitCommandError, configparser.Error) as e:
             self.error_occurred.emit(f"Failed to link repository: {e}")
 
     def fix_main_master_divergence(self, repo_path: str):
@@ -329,7 +304,7 @@ class SourceControlManager(QObject):
     _request_pull = pyqtSignal(str)
     _request_clone = pyqtSignal(str, str, object)
     _request_publish = pyqtSignal(str, str)
-    _request_create_tag = pyqtSignal(str, str, str)
+    _request_create_tag = pyqtSignal(str, str, str, object)
     _request_delete_tag = pyqtSignal(str, str)
     _request_delete_remote_tag = pyqtSignal(str, str)
     _request_link_to_remote = pyqtSignal(str, str)
@@ -420,8 +395,8 @@ class SourceControlManager(QObject):
     def publish_repo(self, path: str, url: str):
         self._request_publish.emit(path, url)
 
-    def create_tag(self, path: str, tag: str, title: str):
-        self._request_create_tag.emit(path, tag, title)
+    def create_tag(self, path: str, tag: str, title: str, author: git.Actor):
+        self._request_create_tag.emit(path, tag, title, author)
 
     def delete_tag(self, path: str, tag: str):
         self._request_delete_tag.emit(path, tag)

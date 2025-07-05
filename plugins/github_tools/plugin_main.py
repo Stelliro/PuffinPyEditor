@@ -190,7 +190,7 @@ class GitHubToolsPlugin:
 
         self._release_state = {'dialog_data': dialog.get_release_data(), 'project_path': project_path, 'owner': owner,
                                'repo_name': repo_name, 'step': None}
-        self._advance_release_state("CREATE_TAG")
+        self._advance_release_state("BUMP_VERSION_COMMIT")
 
     def _advance_release_state(self, next_step):
         self._release_state['step'] = next_step
@@ -201,54 +201,65 @@ class GitHubToolsPlugin:
         if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(True, f"Step: {step_title}...")
         if self.progress_dialog: self.progress_dialog.set_step(step_title)
 
-        if step == "CREATE_TAG":
+        # Re-ordered workflow: Commit -> Push Commit -> Tag -> Push Tag -> Release
+        try:
+            repo = git.Repo(project_path)
+            with repo.config_reader() as cr:
+                name = cr.get_value('user', 'name')
+                email = cr.get_value('user', 'email')
+            author = Actor(name, email)
+            self._release_state['author'] = author # Store for later steps
+        except Exception as e:
+            self._on_release_step_failed(f"Could not read Git author info: {e}")
+            return
+
+        if step == "BUMP_VERSION_COMMIT":
+            if not versioning.write_new_version(dialog_data['tag']):
+                self._on_release_step_failed("Failed to write new version to VERSION.txt.")
+                return
+            self.main_window._update_window_title()
             self.git_manager.git_success.connect(self._on_release_step_succeeded)
             self.git_manager.git_error.connect(self._on_release_step_failed)
-            self.git_manager.create_tag(project_path, dialog_data['tag'], dialog_data['title'])
+            self.git_manager.commit_files(project_path, f"ci: Release {dialog_data['tag']}", author)
+        
+        elif step == "PUSH_MAIN_BRANCH":
+            self.git_manager.git_success.connect(self._on_release_step_succeeded)
+            self.git_manager.git_error.connect(self._on_release_step_failed)
+            self.git_manager.push(project_path)
+
+        elif step == "CREATE_TAG":
+            self.git_manager.git_success.connect(self._on_release_step_succeeded)
+            self.git_manager.git_error.connect(self._on_release_step_failed)
+            self.git_manager.create_tag(project_path, dialog_data['tag'], dialog_data['title'], author)
+
         elif step == "PUSH_TAG":
             self.git_manager.git_success.connect(self._on_release_step_succeeded)
             self.git_manager.git_error.connect(self._on_release_step_failed)
             self.git_manager.push_specific_tag(project_path, dialog_data['tag'])
+
         elif step == "CREATE_RELEASE":
             self.github_manager.operation_success.connect(self._on_release_step_succeeded)
             self.github_manager.operation_failed.connect(self._on_release_step_failed)
             self.github_manager.create_github_release(
                 owner=self._release_state['owner'], repo=self._release_state['repo_name'], tag_name=dialog_data['tag'],
                 name=dialog_data['title'], body=dialog_data['notes'], prerelease=dialog_data['prerelease'])
+
         elif step == "BUILD_ASSETS":
             self._run_build_script(project_path)
+            
         elif step == "UPLOAD_ASSETS":
             self._upload_assets()
-        elif step == "BUMP_VERSION_COMMIT":
-            if not versioning.write_new_version(dialog_data['tag']):
-                self._on_release_step_failed("Failed to write new version to VERSION.txt.")
-                return
-            self.main_window._update_window_title()
-
-            # THE FIX: Create the author object before committing.
-            try:
-                repo = git.Repo(project_path)
-                with repo.config_reader() as cr:
-                    name = cr.get_value('user', 'name')
-                    email = cr.get_value('user', 'email')
-                author = Actor(name, email)
-            except Exception as e:
-                self._on_release_step_failed(f"Could not read Git author info to create commit: {e}")
-                return
-
-            self.git_manager.git_success.connect(self._on_release_step_succeeded)
-            self.git_manager.git_error.connect(self._on_release_step_failed)
-            self.git_manager.commit_files(project_path, f"ci: Release {dialog_data['tag']}", author)
-
-        elif step == "FINAL_PUSH":
-            self.git_manager.git_success.connect(self._on_release_step_succeeded)
-            self.git_manager.git_error.connect(self._on_release_step_failed)
-            self.git_manager.push(project_path)
 
     def _on_release_step_succeeded(self, msg, data):
         step = self._release_state.get('step')
         self._log_to_dialog(f"SUCCESS on step '{step}': {msg}")
-        if step == "CREATE_TAG":
+        
+        # New logical flow
+        if step == "BUMP_VERSION_COMMIT":
+            self._advance_release_state("PUSH_MAIN_BRANCH")
+        elif step == "PUSH_MAIN_BRANCH":
+            self._advance_release_state("CREATE_TAG")
+        elif step == "CREATE_TAG":
             self._advance_release_state("PUSH_TAG")
         elif step == "PUSH_TAG":
             self._advance_release_state("CREATE_RELEASE")
@@ -258,10 +269,7 @@ class GitHubToolsPlugin:
                 "BUILD_ASSETS" if self._release_state['dialog_data'].get("build_installer") else "UPLOAD_ASSETS")
         elif step == "UPLOAD_ASSET":
             self._upload_next_asset()
-        elif step == "BUMP_VERSION_COMMIT":
-            self._advance_release_state("FINAL_PUSH")
-        elif step == "FINAL_PUSH":
-            self._cleanup_release_process(success=True)
+
 
     def _run_build_script(self, project_path):
         build_script_path = os.path.join(project_path, "installer", "build.py")
@@ -369,8 +377,8 @@ class GitHubToolsPlugin:
             self._log_to_dialog(f"Error creating source zip: {e}", is_error=True)
 
         if not assets_to_upload:
-            self._log_to_dialog("No assets to upload, moving to finalize.")
-            self._advance_release_state("BUMP_VERSION_COMMIT")
+            self._log_to_dialog("No assets to upload, finishing release.")
+            self._cleanup_release_process(success=True) # End of the line if no assets
             return
 
         self._release_state['asset_queue'] = assets_to_upload
@@ -381,7 +389,7 @@ class GitHubToolsPlugin:
         asset_queue = self._release_state.get('asset_queue', [])
         if not asset_queue:
             self._log_to_dialog("All assets uploaded successfully.")
-            self._advance_release_state("BUMP_VERSION_COMMIT")
+            self._cleanup_release_process(success=True) # End of the line
             return
         asset_path, upload_url = asset_queue.pop(0), self._release_state['release_info']['upload_url']
         if self.progress_dialog: self.progress_dialog.set_step(f"Uploading {os.path.basename(asset_path)}")
