@@ -6,6 +6,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -80,6 +81,8 @@ puffin_editor_settings.json
 >>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
 =======
 >>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
+=======
+>>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
 # Ignore common temp files
 *.tmp, *.bak, *~
 # Ignore local environment
@@ -91,6 +94,9 @@ venv/, .venv/
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
+=======
 >>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
 =======
 >>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032

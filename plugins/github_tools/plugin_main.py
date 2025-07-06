@@ -4,7 +4,7 @@ import shutil
 import tempfile
 import git
 import configparser
-from git import Actor
+from git import Actor, Repo
 from PyQt6.QtWidgets import (QInputDialog, QMessageBox, QTextEdit, QDialog,
                              QVBoxLayout, QLabel, QProgressBar, QPushButton,
                              QDialogButtonBox)
@@ -125,13 +125,15 @@ class GitHubToolsPlugin:
         try:
             repo = git.Repo(path)
             if repo.is_dirty(untracked_files=True):
-                self.api.show_message("critical", "Uncommitted Changes", "Your repository has uncommitted changes or untracked files. Please commit or stash them before creating a release.")
+                # Check for unmerged files specifically.
+                unmerged_paths = [p for p, _ in repo.index.unmerged_blobs().items()]
+                if unmerged_paths:
+                    msg = "Your repository has unresolved merge conflicts. Please resolve them, commit the changes, and try again."
+                else:
+                    msg = "Your repository has uncommitted changes or untracked files. Please commit or stash them before creating a release."
+                self.api.show_message("critical", "Unclean Repository", msg)
                 return
-            if os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD')):
-                if self._handle_unresolved_merge(repo):
-                    self.api.show_status_message("Re-checking repository state after merge abort...")
-                    self._prepare_repository_for_release(path)
-                return
+
             if not repo.remotes:
                 self.api.show_message("critical", "No Remote", "This project has no remote repository configured.")
                 return
@@ -152,26 +154,7 @@ class GitHubToolsPlugin:
         except Exception as e:
             self.api.show_message("critical", "Repository Error", f"Could not check repository status: {e}")
 
-    def _handle_unresolved_merge(self, repo: git.Repo) -> bool:
-        msg_box = QMessageBox(self.main_window)
-        msg_box.setIcon(QMessageBox.Icon.Warning)
-        msg_box.setTextFormat(Qt.TextFormat.RichText)
-        msg_box.setWindowTitle("Unresolved Merge")
-        msg_box.setText("Your repository has an unresolved merge conflict.")
-        msg_box.setInformativeText("To proceed, the merge must be aborted. This is a safe action that will revert your project to the state before the merge began.")
-        abort_button = msg_box.addButton("Abort Merge and Continue", QMessageBox.ButtonRole.AcceptRole)
-        cancel_button = msg_box.addButton("Cancel Release", QMessageBox.ButtonRole.RejectRole)
-        msg_box.exec()
-
-        if msg_box.clickedButton() == abort_button:
-            try:
-                repo.git.merge('--abort')
-                return True
-            except git.GitCommandError as e:
-                self.api.show_message("critical", "Abort Failed", f"Could not abort merge: {e.stderr}")
-        return False
-
-    def _check_and_handle_branch_sync(self, repo: git.Repo) -> tuple[bool, bool, str]:
+    def _check_and_handle_branch_sync(self, repo: Repo) -> tuple[bool, bool, str]:
         self.api.show_status_message("Fetching remote status...")
         try:
             repo.remotes.origin.fetch()
@@ -187,39 +170,41 @@ class GitHubToolsPlugin:
         ahead_commits = list(repo.iter_commits(f'{tracking_branch.name}..{active_branch.name}'))
         behind_commits = list(repo.iter_commits(f'{active_branch.name}..{tracking_branch.name}'))
 
+        # Case 1: Diverged history. This is the most dangerous state.
+        if ahead_commits and behind_commits:
+            error_msg = (
+                "Your local branch has diverged from the remote repository "
+                "(both have new changes).\n\nPlease use an external Git client to "
+                "manually `git pull` or `git rebase` to resolve the divergence "
+                "before creating a release."
+            )
+            self.api.show_message("critical", "Branch has Diverged", error_msg)
+            return False, False, "User intervention required for diverged branch."
+
+        # Case 2: Local is behind remote. Safe to pull.
         if behind_commits:
             msg_box = QMessageBox(self.main_window)
             msg_box.setIcon(QMessageBox.Icon.Question)
-            msg_box.setWindowTitle("Branch Not Synchronized")
-            # FIX: Set a minimum width to prevent button text truncation
-            msg_box.setMinimumWidth(400)
+            msg_box.setWindowTitle("Branch Is Behind")
+            msg_box.setText("Your local branch is behind the remote repository.")
+            msg_box.setInformativeText("It is strongly recommended to pull these changes before creating a release. Do you want to pull now?")
             
-            if ahead_commits:
-                msg_box.setText("Your local branch has diverged from the remote (both have new changes).")
-                msg_box.setInformativeText("To create a clean release, it's recommended to merge the remote changes into your local branch first. How would you like to proceed?")
-                proceed_button = msg_box.addButton("Proceed Anyway (Advanced)", QMessageBox.ButtonRole.ActionRole)
-                proceed_button.setToolTip("Create the release using only your local commits. This is for advanced users who intend to force-push later.")
-            else:
-                msg_box.setText("Your local branch is behind the remote repository.")
-                msg_box.setInformativeText("You are missing changes that exist on the remote. It is strongly recommended to pull these changes before creating a release.")
-            
-            pull_button = msg_box.addButton("Pull Changes (Recommended)", QMessageBox.ButtonRole.AcceptRole)
+            pull_button = msg_box.addButton("Pull Changes", QMessageBox.ButtonRole.AcceptRole)
             cancel_button = msg_box.addButton("Cancel Release", QMessageBox.ButtonRole.RejectRole)
             msg_box.setDefaultButton(pull_button)
             msg_box.exec()
 
-            clicked_btn = msg_box.clickedButton()
-            if clicked_btn == pull_button:
+            if msg_box.clickedButton() == pull_button:
                 self._trigger_background_pull(repo.working_dir)
-                return False, True, ""
-            elif ahead_commits and clicked_btn == proceed_button:
-                self.api.log_warning("User chose to proceed with release despite diverged branch.")
-                return True, False, ""
+                return False, True, "" # A fix is being attempted
             else:
                 return False, False, "Synchronization was cancelled by user."
         
+        # Case 3: Local is ahead or perfectly synced.
         if ahead_commits:
             self.api.log_info(f"Branch '{active_branch.name}' is {len(ahead_commits)} commit(s) ahead, which is expected for a new release.")
+        else:
+            self.api.log_info(f"Branch '{active_branch.name}' is up-to-date with the remote.")
         
         return True, False, ""
 
@@ -236,15 +221,15 @@ class GitHubToolsPlugin:
         except TypeError: pass
 
         if success:
-            self.api.get_main_window().explorer_panel.refresh()
+            if hasattr(self.main_window, 'explorer_panel') and self.main_window.explorer_panel:
+                self.main_window.explorer_panel.refresh()
+            # Retry the checks after a successful pull
             self._prepare_repository_for_release(repo_path)
         else:
-            # FIX: Create a QMessageBox that can render HTML to show the reason cleanly.
             msg_box = QMessageBox(self.main_window)
             msg_box.setIcon(QMessageBox.Icon.Critical)
             msg_box.setWindowTitle("Pull Failed")
             msg_box.setText("Could not synchronize with the remote repository.")
-            # The 'message' from git_error contains the specific reason.
             msg_box.setInformativeText(f"<b>Reason:</b><br><pre>{message}</pre>")
             msg_box.exec()
 
@@ -279,12 +264,11 @@ class GitHubToolsPlugin:
         if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(True, f"Step: {step_title}...")
         
         project_path = self._release_state['project_path']
-        try:
-            repo = git.Repo(project_path)
-            with repo.config_reader() as cr:
-                author = Actor(cr.get_value('user', 'name'), cr.get_value('user', 'email'))
-        except Exception as e:
-            self._on_release_step_failed(f"Could not read Git author info: {e}")
+        
+        # FIX: The author should now be retrieved from the GitManager
+        author = self.git_manager._get_commit_author(project_path)
+        if not author:
+            self._on_release_step_failed("Could not determine commit author. Please log in to GitHub or set your local git config.")
             return
 
         self._cleanup_connections()
