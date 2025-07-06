@@ -27,7 +27,6 @@ class GitWorker(QObject):
                 email = cr.get_value('user', 'email', None)
             if name and email:
                 return Actor(name, email)
-            # Fallback to global config if local is not set
             git_cmd = git.Git(repo.working_dir)
             global_name = git_cmd.config('--global', '--get', 'user.name')
             global_email = git_cmd.config('--global', '--get', 'user.email')
@@ -111,14 +110,12 @@ class GitWorker(QObject):
             )
             self.error_occurred.emit(err_msg)
 
-    # FIX: The author is no longer passed in, it's retrieved internally.
     def commit_files(self, repo_path: str, message: str):
         try:
             repo = Repo(repo_path)
             author = self._get_commit_author(repo)
             if not author:
-                self.error_occurred.emit(
-                    "Commit author not found. Please set user.name and user.email in your Git config.")
+                self.error_occurred.emit("Commit author not found. Please set user.name and user.email in your Git config.")
                 return
 
             repo.git.add(A=True)
@@ -190,6 +187,32 @@ class GitWorker(QObject):
                 msg = f"Git Pull failed. Stderr: {e.stderr.strip()}"
             self.error_occurred.emit(msg)
 
+    # NEW METHOD
+    def force_push(self, repo_path: str):
+        """Force pushes the current branch to the remote."""
+        try:
+            repo = Repo(repo_path)
+            origin = repo.remotes.origin
+            log.warning(f"FORCE PUSHING branch '{repo.active_branch.name}' to '{origin.url}'")
+            origin.push(force=True)
+            self.operation_success.emit("Force push successful.", {})
+        except GitCommandError as e:
+            self.error_occurred.emit(f"Force Push failed: {e.stderr.strip()}")
+
+    # NEW METHOD
+    def abort_merge(self, repo_path: str):
+        """Aborts a conflicted merge state."""
+        try:
+            repo = Repo(repo_path)
+            if os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD')):
+                log.info(f"Aborting merge in {repo_path}")
+                repo.git.merge('--abort')
+                self.operation_success.emit("Merge successfully aborted.", {})
+            else:
+                self.error_occurred.emit("No active merge to abort.")
+        except GitCommandError as e:
+            self.error_occurred.emit(f"Failed to abort merge: {e.stderr.strip()}")
+
     def clone_repo(self, url: str, path: str, branch: Optional[str] = None):
         try:
             target_dir = os.path.join(
@@ -216,14 +239,12 @@ class GitWorker(QObject):
                 msg = f"Clone failed: {e}"
             self.error_occurred.emit(msg)
 
-    # FIX: The author is no longer passed in, it's retrieved internally.
     def create_tag(self, repo_path: str, tag: str, title: str):
         try:
             repo = Repo(repo_path)
             author = self._get_commit_author(repo)
             if not author:
-                self.error_occurred.emit(
-                    "Commit author not found. Please set user.name and user.email in your Git config.")
+                self.error_occurred.emit("Commit author not found. Please set user.name and user.email in your Git config.")
                 return
 
             if not repo.head.is_valid():
@@ -231,8 +252,7 @@ class GitWorker(QObject):
                 gitignore_path = os.path.join(repo_path, ".gitignore")
                 if not os.path.exists(gitignore_path):
                     with open(gitignore_path, 'w', encoding='utf-8') as f:
-                        f.write(
-                            "# Python\n__pycache__/\n*.pyc\n\n# Env\n.env\nvenv/\n.venv/\n\n# Build\nbuild/\ndist/\n*.egg-info/\n")
+                        f.write("# Python\n__pycache__/\n*.pyc\n\n# Env\n.env\nvenv/\n.venv/\n\n# Build\nbuild/\ndist/\n*.egg-info/\n")
                 repo.git.add(A=True)
                 if repo.is_dirty(untracked_files=True):
                     repo.index.commit("Initial commit", author=author, committer=author)
@@ -243,7 +263,7 @@ class GitWorker(QObject):
             if tag in repo.tags:
                 log.warning(f"Tag '{tag}' already exists. Re-creating it.")
                 repo.delete_tag(tag)
-
+            
             repo.create_tag(tag, message=title)
             self.operation_success.emit(f"Tag created: {tag}", {})
         except GitCommandError as e:
@@ -272,9 +292,8 @@ class GitWorker(QObject):
             repo = Repo.init(path)
             author = self._get_commit_author(repo)
             if not author:
-                self.error_occurred.emit(
-                    "Could not determine commit author to publish. Please configure Git user.name and user.email.")
-                return
+                 self.error_occurred.emit("Could not determine commit author to publish. Please configure Git user.name and user.email.")
+                 return
 
             repo.git.branch('-M', 'main')
             if (repo.is_dirty(untracked_files=True) and
@@ -315,8 +334,7 @@ class GitWorker(QObject):
                     not repo.head.is_valid()):
                 author = self._get_commit_author(repo)
                 if not author:
-                    self.error_occurred.emit(
-                        "Could not determine commit author. Please configure Git user.name and user.email.")
+                    self.error_occurred.emit("Could not determine commit author. Please configure Git user.name and user.email.")
                     return
                 repo.git.add(A=True)
                 repo.index.commit(
@@ -352,12 +370,12 @@ class SourceControlManager(QObject):
 
     _request_summaries = pyqtSignal(list)
     _request_status = pyqtSignal(str)
-    _request_commit = pyqtSignal(str, str)  # FIX: No longer needs author
+    _request_commit = pyqtSignal(str, str)
     _request_push = pyqtSignal(str, str)
     _request_pull = pyqtSignal(str)
     _request_clone = pyqtSignal(str, str, object)
     _request_publish = pyqtSignal(str, str)
-    _request_create_tag = pyqtSignal(str, str, str)  # FIX: No longer needs author
+    _request_create_tag = pyqtSignal(str, str, str)
     _request_delete_tag = pyqtSignal(str, str)
     _request_delete_remote_tag = pyqtSignal(str, str)
     _request_link_to_remote = pyqtSignal(str, str)
@@ -365,6 +383,9 @@ class SourceControlManager(QObject):
     _request_set_git_config = pyqtSignal(str, str)
     _request_fix_branches = pyqtSignal(str)
     _request_set_default_branch = pyqtSignal()
+    # NEW SIGNALS
+    _request_force_push = pyqtSignal(str)
+    _request_abort_merge = pyqtSignal(str)
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -388,6 +409,10 @@ class SourceControlManager(QObject):
             self.worker.fix_main_master_divergence)
         self._request_set_default_branch.connect(
             self.worker.set_default_branch)
+        # NEW CONNECTIONS
+        self._request_force_push.connect(self.worker.force_push)
+        self._request_abort_merge.connect(self.worker.abort_merge)
+
         self.worker.summaries_ready.connect(self.summaries_ready)
         self.worker.status_ready.connect(self.status_updated)
         self.worker.error_occurred.connect(self.git_error)
@@ -402,10 +427,8 @@ class SourceControlManager(QObject):
         if match := re.search(r"github\.com:([^/]+)/([^/.]+)", url):
             return match.group(1), match.group(2)
         return None, None
-
-    # NEW internal helper method
+    
     def _get_commit_author(self, repo_path: str) -> Optional[Actor]:
-        """Gets the commit author for a repository, prioritizing local config."""
         try:
             repo = Repo(repo_path)
             return self.worker._get_commit_author(repo)
@@ -439,7 +462,6 @@ class SourceControlManager(QObject):
     def get_status(self, path: str):
         self._request_status.emit(path)
 
-    # FIX: Remove the author argument from the public-facing method
     def commit_files(self, path: str, msg: str):
         self._request_commit.emit(path, msg)
 
@@ -451,6 +473,13 @@ class SourceControlManager(QObject):
 
     def pull(self, path: str):
         self._request_pull.emit(path)
+        
+    # NEW PUBLIC METHODS
+    def force_push(self, path: str):
+        self._request_force_push.emit(path)
+
+    def abort_merge(self, path: str):
+        self._request_abort_merge.emit(path)
 
     def clone_repo(self, url: str, path: str, branch: Optional[str] = None):
         self._request_clone.emit(url, path, branch)
@@ -458,7 +487,6 @@ class SourceControlManager(QObject):
     def publish_repo(self, path: str, url: str):
         self._request_publish.emit(path, url)
 
-    # FIX: Remove the author argument from the public-facing method
     def create_tag(self, path: str, tag: str, title: str):
         self._request_create_tag.emit(path, tag, title)
 

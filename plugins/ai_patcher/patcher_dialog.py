@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QTextEdit, QPushButton, QStackedWidget,
     QFileDialog, QMessageBox, QFrame, QLabel, QListWidget,
     QTreeView, QToolButton, QInputDialog, QSpinBox, QCheckBox,
-    QGroupBox, QFormLayout, QLineEdit
+    QGroupBox, QFormLayout, QLineEdit, QSizePolicy
 )
 from PyQt6.QtGui import QStandardItemModel, QStandardItem
 from PyQt6.QtCore import Qt, QTimer
@@ -18,6 +18,8 @@ from app_core.puffin_api import PuffinPluginAPI
 from app_core.settings_manager import settings_manager
 from .response_parser import parse_llm_response, apply_changes_to_project
 from utils.logger import log
+# FIX: Import the helper function to clean files before adding them to the prompt.
+from utils.helpers import clean_git_conflict_markers
 
 
 class AIPatcherDialog(QDialog):
@@ -221,7 +223,6 @@ class AIPatcherDialog(QDialog):
                 QMessageBox.critical(self, "Error Reading File", f"Could not read context file: {e}")
                 return
         
-        # Build instructions
         instructions = [
             "You are an expert developer tasked with updating a codebase. Based on the provided "
             f"context file (`{os.path.basename(context_file)}`), please update the project source files. "
@@ -237,9 +238,9 @@ class AIPatcherDialog(QDialog):
         guidelines = [f"The primary instructions are in the context file: {os.path.basename(context_file)}"] if context_content else []
         golden_rules = [self.golden_rules_list.item(i).text() for i in range(self.golden_rules_list.count())]
 
-        # Build prompt using a simplified version of the AI Export logic
         project_name = os.path.basename(self.project_root)
-        file_tree_text = self.project_manager._generate_file_tree_from_list(self.project_root, selected_files)
+        # FIX: The project_manager method is private; call the underlying helper directly
+        file_tree_text = "\n".join(self.project_manager._generate_file_tree_from_list(self.project_root, selected_files))
         
         prompt_parts = [
             f"# Project Patch Request: {project_name}", "---",
@@ -256,7 +257,13 @@ class AIPatcherDialog(QDialog):
             lang = os.path.splitext(file_path)[1].lstrip('.') or 'text'
             prompt_parts.append(f"### File: `/{relative_path}`\n```{lang}")
             try:
-                with open(file_path, 'r', encoding='utf-8') as f: prompt_parts.append(f.read())
+                # FIX: Read and clean the file content before appending it.
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    original_content = f.read()
+                    cleaned_content = clean_git_conflict_markers(original_content)
+                    if original_content != cleaned_content:
+                        log.info(f"Cleaned git conflict markers from {file_path} for patcher prompt.")
+                    prompt_parts.append(cleaned_content)
             except Exception as e:
                 prompt_parts.append(f"[Error reading file: {e}]")
             prompt_parts.append("```")
@@ -298,7 +305,6 @@ class AIPatcherDialog(QDialog):
             else:
                 QMessageBox.critical(self, "Patch Failed", message)
 
-    # --- Methods copied from AIExportDialog for File Tree ---
     def _populate_file_tree(self):
         self.file_model.clear()
         root_node = self.file_model.invisibleRootItem()
@@ -389,7 +395,6 @@ class AIPatcherDialog(QDialog):
         for r in range(root.rowCount()): recurse(root.child(r))
         return files
 
-    # --- Methods copied from AIExportDialog for Golden Rules ---
     def _load_and_populate_golden_rule_sets(self):
         self.golden_rule_sets = settings_manager.get("ai_export_golden_rules", {})
         self.golden_rules_combo.clear()

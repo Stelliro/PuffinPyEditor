@@ -4,7 +4,7 @@ from typing import List, Dict, Optional
 from git import Repo, InvalidGitRepositoryError, Actor
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTreeWidget,
                              QTreeWidgetItem, QMenu, QMessageBox, QLabel, QHeaderView, QLineEdit, QComboBox,
-                             QSizePolicy)
+                             QSizePolicy, QFrame)
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 import qtawesome as qta
@@ -37,7 +37,7 @@ class ProjectSourceControlPanel(QWidget):
         self.api = puffin_api
         self.staged_color = QColor("#A7C080")
         self.unstaged_color = QColor("#DBBC7F")
-        self.conflicted_color = QColor("#E53935") # Added color for conflicts
+        self.conflicted_color = QColor("#E53935")
         self._setup_ui()
         self._connect_signals()
         self.update_icons()
@@ -45,21 +45,40 @@ class ProjectSourceControlPanel(QWidget):
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
-        toolbar_layout = QHBoxLayout()
+
+        # Main actions toolbar
+        main_actions_layout = QHBoxLayout()
         self.refresh_all_button = QPushButton("Refresh")
         self.pull_button = QPushButton("Pull")
         self.push_button = QPushButton("Push")
         self.new_release_button = QPushButton("New Release...")
+        
+        main_actions_layout.addWidget(self.refresh_all_button)
+        main_actions_layout.addWidget(self.pull_button)
+        main_actions_layout.addWidget(self.push_button)
+        main_actions_layout.addStretch()
+        main_actions_layout.addWidget(self.new_release_button)
+        layout.addLayout(main_actions_layout)
+
+        # Advanced/dangerous actions toolbar
+        advanced_actions_frame = QFrame()
+        advanced_actions_frame.setObjectName("AdvancedActionsFrame")
+        advanced_actions_layout = QHBoxLayout(advanced_actions_frame)
+        advanced_actions_layout.setContentsMargins(0, 2, 0, 2)
+        advanced_actions_layout.addWidget(QLabel("Advanced:"))
+        self.force_push_button = QPushButton("Force Push")
+        self.force_push_button.setToolTip("DANGER: Overwrites remote history with your local branch.")
+        self.abort_merge_button = QPushButton("Abort Merge")
+        self.abort_merge_button.setToolTip("Aborts a conflicted merge and resets your branch.")
         self.cleanup_tags_button = QPushButton("Cleanup Tags")
         self.cleanup_tags_button.setToolTip("Delete remote tags that are not part of a release.")
         
-        toolbar_layout.addWidget(self.refresh_all_button)
-        toolbar_layout.addWidget(self.pull_button)
-        toolbar_layout.addWidget(self.push_button)
-        toolbar_layout.addStretch()
-        toolbar_layout.addWidget(self.cleanup_tags_button)
-        toolbar_layout.addWidget(self.new_release_button)
-        layout.addLayout(toolbar_layout)
+        advanced_actions_layout.addWidget(self.force_push_button)
+        advanced_actions_layout.addWidget(self.abort_merge_button)
+        advanced_actions_layout.addStretch()
+        advanced_actions_layout.addWidget(self.cleanup_tags_button)
+        self.abort_merge_button.hide() # Hide by default
+        layout.addWidget(advanced_actions_frame)
 
         self.project_tree = QTreeWidget()
         self.project_tree.setHeaderLabels(["Project / Changes", ""])
@@ -76,7 +95,6 @@ class ProjectSourceControlPanel(QWidget):
         self.commit_message_edit.lineEdit().setPlaceholderText("Commit message...")
         self.commit_message_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-
         self.commit_button = QPushButton("Commit All")
         commit_layout = QHBoxLayout()
         commit_layout.addWidget(self.commit_message_edit)
@@ -86,10 +104,10 @@ class ProjectSourceControlPanel(QWidget):
         layout.addWidget(self.status_label)
 
         self.action_buttons = [self.refresh_all_button, self.pull_button, self.push_button,
-                               self.new_release_button, self.commit_button, self.cleanup_tags_button]
+                               self.new_release_button, self.commit_button, self.cleanup_tags_button,
+                               self.force_push_button, self.abort_merge_button]
 
     def _connect_signals(self):
-        # FIX: Connect to the correct signal from the manager
         self.git_manager.status_updated.connect(self._update_project_files)
         self.git_manager.summaries_ready.connect(self._populate_tree)
         self.git_manager.git_error.connect(self._handle_git_error)
@@ -101,13 +119,17 @@ class ProjectSourceControlPanel(QWidget):
         self.push_button.clicked.connect(self._on_push_clicked)
         self.pull_button.clicked.connect(self._on_pull_clicked)
         self.new_release_button.clicked.connect(self._on_new_release_clicked)
-        self.cleanup_tags_button.clicked.connect(self._on_cleanup_tags_clicked)
         self.commit_button.clicked.connect(self._on_commit_clicked)
+        # NEW CONNECTIONS
+        self.force_push_button.clicked.connect(self._on_force_push_clicked)
+        self.abort_merge_button.clicked.connect(self._on_abort_merge_clicked)
+        self.cleanup_tags_button.clicked.connect(self._on_cleanup_tags_clicked)
         self.project_tree.customContextMenuRequested.connect(self._show_context_menu)
 
     def set_ui_locked(self, locked: bool, message: str = ""):
         for button in self.action_buttons:
-            button.setEnabled(not locked)
+            if button != self.abort_merge_button: # Keep abort enabled
+                button.setEnabled(not locked)
         self.commit_message_edit.setEnabled(not locked)
         self.status_label.setText(message)
 
@@ -118,23 +140,23 @@ class ProjectSourceControlPanel(QWidget):
         self.new_release_button.setIcon(qta.icon('mdi.tag-outline'))
         self.cleanup_tags_button.setIcon(qta.icon('mdi.tag-remove-outline'))
         self.commit_button.setIcon(qta.icon('mdi.check'))
+        # NEW ICONS
+        self.force_push_button.setIcon(qta.icon('mdi.upload-off-outline', color='orange'))
+        self.abort_merge_button.setIcon(qta.icon('mdi.close-octagon-outline', color='red'))
 
     def showEvent(self, event):
-        """Override to populate history when the panel becomes visible."""
         super().showEvent(event)
         self._populate_commit_history()
 
     def _populate_commit_history(self):
-        """Loads commit messages from settings and populates the combo box."""
         history = settings_manager.get("commit_message_history", [])
         self.commit_message_edit.clear()
         self.commit_message_edit.addItems(history)
-        self.commit_message_edit.setCurrentText("") # Start with an empty editable field
+        self.commit_message_edit.setCurrentText("")
 
     def _get_selected_project_path(self) -> Optional[str]:
         item = self.project_tree.currentItem()
         if not item:
-            # Fallback to the active project if no specific item is selected in the SC panel
             return self.project_manager.get_active_project_path()
         while parent := item.parent():
             item = parent
@@ -145,6 +167,29 @@ class ProjectSourceControlPanel(QWidget):
         if path := self._get_selected_project_path():
             self.set_ui_locked(True, f"Pushing {os.path.basename(path)}...")
             self.git_manager.push(path)
+
+    def _on_force_push_clicked(self):
+        if not (path := self._get_selected_project_path()):
+            return
+        
+        reply = QMessageBox.warning(
+            self,
+            "Confirm Force Push",
+            "<b>DANGER:</b> Force pushing overwrites the remote history with your local "
+            "branch. This can discard commits for other team members.\n\n"
+            "Only do this if you are absolutely sure. Are you sure you want to force push?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.set_ui_locked(True, f"Force pushing {os.path.basename(path)}...")
+            self.git_manager.force_push(path)
+            
+    def _on_abort_merge_clicked(self):
+        if not (path := self._get_selected_project_path()):
+            return
+        self.set_ui_locked(True, f"Aborting merge in {os.path.basename(path)}...")
+        self.git_manager.abort_merge(path)
 
     def _on_pull_clicked(self):
         if path := self._get_selected_project_path():
@@ -164,12 +209,10 @@ class ProjectSourceControlPanel(QWidget):
              return
 
         if not path or not message:
-            QMessageBox.warning(self, "Commit Failed", "A project must be selected "
-                                "and a commit message must be provided.")
+            QMessageBox.warning(self, "Commit Failed", "A project must be selected and a commit message must be provided.")
             return
 
         self.set_ui_locked(True, f"Committing changes in {os.path.basename(path)}...")
-        # FIX: Pass only path and message. The manager now handles the author.
         self.git_manager.commit_files(path, message)
 
     def _on_cleanup_tags_clicked(self):
@@ -295,7 +338,11 @@ class ProjectSourceControlPanel(QWidget):
             if item_data and item_data.get('path') == repo_path:
                 project_item.takeChildren()
                 
-                # Create a "Conflicts" section if there are unmerged files
+                # Show/hide the Abort Merge button based on repository state
+                repo = Repo(repo_path)
+                is_merging = os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD'))
+                self.abort_merge_button.setVisible(is_merging)
+                
                 if conflicted:
                     conflicts_header = QTreeWidgetItem(project_item, ["Conflicts (Resolve Manually)"])
                     conflicts_header.setForeground(0, self.conflicted_color)
@@ -334,8 +381,16 @@ class ProjectSourceControlPanel(QWidget):
                            lambda: self.git_manager.get_status(path))
             vis_action = menu.addAction(qta.icon('mdi.eye-outline'), "Change GitHub Visibility...")
             vis_action.triggered.connect(lambda: self.change_visibility_requested.emit(path))
+            
+            repo = Repo(path)
+            is_merging = os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD'))
+            if is_merging:
+                menu.addSeparator()
+                abort_action = menu.addAction(qta.icon('mdi.close-octagon-outline', color='red'), "Abort Merge")
+                abort_action.triggered.connect(lambda: self._on_abort_merge_clicked())
+
             try:
-                branches = [b.name for b in Repo(path).branches]
+                branches = [b.name for b in repo.branches]
                 if 'main' in branches and 'master' in branches:
                     menu.addSeparator()
                     fix_action = menu.addAction(qta.icon('mdi.alert-outline',
