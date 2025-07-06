@@ -52,8 +52,15 @@ class UploadProgressDialog(QDialog):
     def set_step(self, step_name: str):
         self.step_label.setText(f"Step: {step_name}")
 
-    def add_log(self, message: str, is_error: bool = False):
-        color = "#FF5555" if is_error else "#D4D4D4"
+    # FIX: Add 'is_warning' parameter to handle a third color state
+    def add_log(self, message: str, is_error: bool = False, is_warning: bool = False):
+        if is_error:
+            color = "#FF5555"
+        elif is_warning:
+            color = "#FFC66D"  # A nice amber/yellow color for warnings
+        else:
+            color = "#D4D4D4"
+
         self.log_console.append(f"<span style='color:{color};'>{message}</span>")
         self.log_console.verticalScrollBar().setValue(self.log_console.verticalScrollBar().maximum())
 
@@ -84,11 +91,12 @@ class GitHubToolsPlugin:
     def _get_sc_panel(self):
         return getattr(self.main_window, 'source_control_panel', None)
 
-    def _log_to_dialog(self, message: str, is_error: bool = False):
-        log_func = self.api.log_error if is_error else self.api.log_info
+    # FIX: Add 'is_warning' parameter to match the call site
+    def _log_to_dialog(self, message: str, is_error: bool = False, is_warning: bool = False):
+        log_func = self.api.log_error if is_error else (self.api.log_warning if is_warning else self.api.log_info)
         log_func(f"[Release] {message}")
         if self.progress_dialog:
-            self.progress_dialog.add_log(message, is_error)
+            self.progress_dialog.add_log(message, is_error=is_error, is_warning=is_warning)
 
     def ensure_git_identity(self, project_path: str) -> bool:
         # Check for local .git/config first
@@ -98,9 +106,8 @@ class GitHubToolsPlugin:
                 if cr.has_section('user') and cr.has_option('user', 'name') and cr.has_option('user', 'email'):
                     return True
         except Exception:
-            pass  # Ignore errors here, we'll try the next method
+            pass
 
-        # Fallback to checking GitHub login
         user_info = self.github_manager.get_user_info()
         if not (user_info and user_info.get('login')):
             self.api.show_message("warning", "GitHub Login Required",
@@ -276,12 +283,10 @@ class GitHubToolsPlugin:
                 self._on_release_step_failed("Failed to write new version to VERSION.txt")
                 return
             self.main_window._update_window_title()
-            # FIX: No longer pass the author object here
             self.git_manager.commit_files(project_path, f"ci: Release {dialog_data['tag']}")
         elif next_step == "PUSH_MAIN_BRANCH":
             self.git_manager.push(project_path)
         elif next_step == "CREATE_TAG":
-            # FIX: No longer pass the author object here
             self.git_manager.create_tag(project_path, dialog_data['tag'], dialog_data['title'])
         elif next_step == "PUSH_TAG":
             self.git_manager.push_specific_tag(project_path, dialog_data['tag'])
@@ -319,7 +324,7 @@ class GitHubToolsPlugin:
 
     def _upload_next_asset(self):
         if not self._release_state.get('asset_queue'):
-            self._log_to_dialog("All assets uploaded.")
+            self.api.show_message("info", "Release Complete", "Release created and all assets uploaded successfully.")
             self._cleanup_release_process(success=True)
             return
 
