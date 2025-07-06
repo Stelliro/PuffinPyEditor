@@ -1,12 +1,17 @@
 # PuffinPyEditor/utils/helpers.py
 import sys
 import os
+import re
 from typing import List, Optional
 from PyQt6.QtGui import QFontDatabase
 from .logger import log
 
 if sys.platform == "win32":
-    import winshell
+    try:
+        import winshell
+    except ImportError:
+        winshell = None
+        log.warning("The 'winshell' package is not installed. Startup shortcut features will be disabled.")
 
 
 def get_base_path():
@@ -35,7 +40,7 @@ def clean_git_conflict_markers(content: str) -> str:
     cleaned_lines = []
     in_conflict = False
     # We want to keep the HEAD version, which is the part before '======='
-    keep_current_version = False
+    keep_current_version = True
 
     for line in lines:
         if line.startswith('<<<<<<<'):

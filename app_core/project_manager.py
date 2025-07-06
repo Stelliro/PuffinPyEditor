@@ -214,9 +214,8 @@ class ProjectManager(QObject):
 
         output_lines.append("\n## 🗂️ File Tree of Included Files:\n```")
         output_lines.append(f"/{project_name}")
-        output_lines.extend(
-            self._generate_file_tree_from_list(project_root, selected_files)
-        )
+        tree_text_lines = self._generate_file_tree_from_list(project_root, selected_files)
+        output_lines.extend(tree_text_lines)
         output_lines.append("```\n---")
         output_lines.append("\n## 📄 File Contents:\n")
 

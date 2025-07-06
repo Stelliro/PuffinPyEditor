@@ -40,6 +40,20 @@ class FileHandler(QObject):
             content = clean_git_conflict_markers(original_content)
             if content != original_content:
                 log.info(f"Cleaned git conflict markers from {filepath} on load.")
+                # Ask user if they want to save the cleaned file
+                reply = QMessageBox.question(
+                    self.parent_window,
+                    "Conflict Markers Removed",
+                    f"Git conflict markers were found and removed from '{os.path.basename(filepath)}'.\n\n"
+                    "Do you want to save these changes back to the file immediately?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        f.write(content)
+                    log.info(f"Saved automatically cleaned file: {filepath}")
+
             self._add_to_recent_files(filepath)
             return filepath, content, None
         except (IOError, OSError, UnicodeDecodeError) as e:
@@ -150,7 +164,6 @@ class FileHandler(QObject):
         try: item_type = 'folder' if os.path.isdir(src_path) else 'file'; shutil.move(src_path, dest_path); log.info(f"Moved '{src_path}' to '{dest_path}'"); self.item_renamed.emit(item_type, src_path, dest_path); return True, dest_path
         except (OSError, shutil.Error) as e: log.error(f"Move operation failed: {e}", exc_info=True); return False, f"Move operation failed: {e}"
 
-    # NEW: Added a dedicated copy method for drag-and-drop
     def copy_item_to_dest(self, src_path: str, dest_dir: str) -> Tuple[bool, Optional[str]]:
         """Copies a file or folder to a destination directory."""
         if not os.path.exists(src_path):
