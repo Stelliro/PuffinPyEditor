@@ -131,7 +131,8 @@ class GitHubToolsPlugin:
                 pass
 
             if current_email not in valid_emails:
-                log_func(f"Current git email ('{current_email}') is not valid for contributions. Updating local config.")
+                log_func(
+                    f"Current git email ('{current_email}') is not valid for contributions. Updating local config.")
                 with repo.config_writer() as config:
                     config.set_value('user', 'name', user_name)
                     config.set_value('user', 'email', noreply_email)
@@ -142,7 +143,8 @@ class GitHubToolsPlugin:
             return True
 
         except Exception as e:
-            self.api.show_message("critical", "Git Configuration Error", f"Could not verify or set Git configuration: {e}")
+            self.api.show_message("critical", "Git Configuration Error",
+                                  f"Could not verify or set Git configuration: {e}")
             return False
 
     def show_create_release_dialog(self, project_path: str = None):
@@ -155,7 +157,7 @@ class GitHubToolsPlugin:
     def _create_release(self, project_path):
         try:
             repo = git.Repo(project_path)
-            
+
             is_modified = repo.is_dirty(untracked_files=False)
             relevant_untracked_files = repo.untracked_files
 
@@ -166,7 +168,7 @@ class GitHubToolsPlugin:
                     error_details.append(f"• {len(modified_files_list)} modified file(s) exist.")
                 if relevant_untracked_files:
                     error_details.append(f"• {len(relevant_untracked_files)} untracked file(s) exist.")
-                
+
                 self.api.show_message(
                     "critical", "Uncommitted Changes",
                     "Your repository has changes that must be committed or stashed before creating a release.\n\n" +
@@ -188,7 +190,7 @@ class GitHubToolsPlugin:
                 abort_button = msg_box.addButton("Abort Merge", QMessageBox.ButtonRole.DestructiveRole)
                 cancel_button = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
                 msg_box.setDefaultButton(cancel_button)
-                
+
                 msg_box.exec()
 
                 if msg_box.clickedButton() == abort_button:
@@ -232,7 +234,8 @@ class GitHubToolsPlugin:
             if not owner or not repo_name: self._on_release_step_failed(
                 "Could not parse owner/repo from remote."); return
         except Exception as e:
-            self._on_release_step_failed(f"Could not analyze repository: {e}"); return
+            self._on_release_step_failed(f"Could not analyze repository: {e}");
+            return
 
         self._release_state = {'dialog_data': dialog.get_release_data(), 'project_path': project_path, 'owner': owner,
                                'repo_name': repo_name, 'step': None}
@@ -272,7 +275,7 @@ class GitHubToolsPlugin:
             self.git_manager.git_success.connect(self._on_release_step_succeeded)
             self.git_manager.git_error.connect(self._on_release_step_failed)
             self.git_manager.commit_files(project_path, f"ci: Release {dialog_data['tag']}", author)
-        
+
         elif step == "PUSH_MAIN_BRANCH":
             self.git_manager.git_success.connect(self._on_release_step_succeeded)
             self.git_manager.git_error.connect(self._on_release_step_failed)
@@ -297,14 +300,14 @@ class GitHubToolsPlugin:
 
         elif step == "BUILD_ASSETS":
             self._run_build_script(project_path)
-            
+
         elif step == "UPLOAD_ASSETS":
             self._upload_assets()
 
     def _on_release_step_succeeded(self, msg, data):
         step = self._release_state.get('step')
         self._log_to_dialog(f"SUCCESS on step '{step}': {msg}")
-        
+
         if step == "PULL_CHANGES":
             self._advance_release_state("BUMP_VERSION_COMMIT")
         elif step == "BUMP_VERSION_COMMIT":
@@ -321,7 +324,6 @@ class GitHubToolsPlugin:
                 "BUILD_ASSETS" if self._release_state['dialog_data'].get("build_installer") else "UPLOAD_ASSETS")
         elif step == "UPLOAD_ASSET":
             self._upload_next_asset()
-
 
     def _run_build_script(self, project_path):
         build_script_path = os.path.join(project_path, "installer", "build.py")
@@ -348,7 +350,8 @@ class GitHubToolsPlugin:
         self.build_process.setWorkingDirectory(project_path)
         program = sys.executable
         command_args = [build_script_path] + args
-        self._log_to_dialog(f"Executing build in '{project_path}': {os.path.basename(program)} {' '.join(command_args)}")
+        self._log_to_dialog(
+            f"Executing build in '{project_path}': {os.path.basename(program)} {' '.join(command_args)}")
 
         self.build_process.start(program, command_args)
 
@@ -359,10 +362,12 @@ class GitHubToolsPlugin:
 
     def _on_build_finished(self, exit_code, exit_status):
         if exit_code == 0:
-            self._log_to_dialog("Build successful."); self._advance_release_state("UPLOAD_ASSETS")
+            self._log_to_dialog("Build successful.");
+            self._advance_release_state("UPLOAD_ASSETS")
         else:
             self._show_build_error_dialog("The build script failed. See details below.",
-                                          "".join(self.build_output_buffer)); self._on_release_step_failed(
+                                          "".join(self.build_output_buffer));
+            self._on_release_step_failed(
                 f"Build script failed with exit code {exit_code}.")
         self.build_process.deleteLater();
         self.build_process = None
@@ -397,7 +402,7 @@ class GitHubToolsPlugin:
         assets_to_upload = []
         dialog_data = self._release_state['dialog_data']
         project_path = self._release_state['project_path']
-        
+
         if dialog_data.get("build_installer"):
             dist_path = os.path.join(project_path, "dist")
             version_str = dialog_data['tag'].lstrip('v')
@@ -497,9 +502,10 @@ class GitHubToolsPlugin:
                                              text=os.path.basename(local_path))
         if not ok or not repo_name:
             if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False, "Publish cancelled."); return
-        
+
         if not self.ensure_git_identity(local_path):
-            if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False, "Publish cancelled: Git identity not set.")
+            if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False,
+                                                                        "Publish cancelled: Git identity not set.")
             return
 
         description, _ = QInputDialog.getText(self.main_window, "Publish to GitHub", "Description (optional):")
@@ -523,9 +529,10 @@ class GitHubToolsPlugin:
     def _link_repo(self, local_path):
         dialog = SelectRepoDialog(self.github_manager, self.main_window)
         if dialog.exec() and (repo_data := dialog.selected_repo_data):
-            
+
             if not self.ensure_git_identity(local_path):
-                if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False, "Link cancelled: Git identity not set.")
+                if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False,
+                                                                            "Link cancelled: Git identity not set.")
                 return
 
             if clone_url := repo_data.get('clone_url'):

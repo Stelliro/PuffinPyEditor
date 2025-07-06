@@ -1,0 +1,66 @@
+[
+    {
+        "id": "ai_tools",
+        "name": "AI Tools",
+        "author": "PuffinPy Team",
+        "version": "1.1.1",
+        "description": "Adds an 'Export for AI' dialog.",
+        "download_url": "https://raw.githubusercontent.com/Stelliro/PuffinPyEditor/main/zips/ai_tools.zip"
+    },
+    {
+        "id": "find_replace",
+        "name": "Find/Replace",
+        "author": "PuffinPy Team",
+        "version": "1.1.1",
+        "description": "Adds a Find/Replace dialog (Ctrl+F).",
+        "download_url": "https://raw.githubusercontent.com/Stelliro/PuffinPyEditor/main/zips/find_replace.zip"
+    },
+    {
+        "id": "github_tools",
+        "name": "GitHub Tools",
+        "author": "PuffinPy Team",
+        "version": "1.1.1",
+        "description": "Provides UI for cloning, releases, and other GitHub interactions.",
+        "download_url": "https://raw.githubusercontent.com/Stelliro/PuffinPyEditor/main/zips/github_tools.zip"
+    },
+    {
+        "id": "linter_ui",
+        "name": "Linter UI",
+        "author": "PuffinPy Team",
+        "version": "1.1.1",
+        "description": "Provides the 'Problems' panel to display linter results from Flake8.",
+        "download_url": "https://raw.githubusercontent.com/Stelliro/PuffinPyEditor/main/zips/linter_ui.zip"
+    },
+    {
+        "id": "markdown_viewer",
+        "name": "Markdown Viewer",
+        "author": "AI Assistant",
+        "version": "1.0.1",
+        "description": "Adds support for viewing rendered Markdown (.md) files in a separate tab. It intercepts file open calls to provide a rich text view instead of a plain text editor for .md files.",
+        "download_url": "https://raw.githubusercontent.com/Stelliro/PuffinPyEditor/main/zips/markdown_viewer.zip"
+    },
+    {
+        "id": "plugin_publisher",
+        "name": "Plugin Publisher",
+        "author": "AI Assistant",
+        "version": "1.0.0",
+        "description": "Provides a tool to package and publish installed plugins to a specified GitHub distribution repository. Manages versioning and updates the repository's index.json.",
+        "download_url": "https://raw.githubusercontent.com/Stelliro/PuffinPyEditor/main/zips/plugin_publisher.zip"
+    },
+    {
+        "id": "python_runner",
+        "name": "Python Runner",
+        "author": "PuffinPy Team",
+        "version": "1.1.1",
+        "description": "Adds functionality to run Python scripts (F5).",
+        "download_url": "https://raw.githubusercontent.com/Stelliro/PuffinPyEditor/main/zips/python_runner.zip"
+    },
+    {
+        "id": "source_control_ui",
+        "name": "Source Control UI",
+        "author": "PuffinPy Team",
+        "version": "1.1.1",
+        "description": "Provides the 'Source Control' panel to view Git status.",
+        "download_url": "https://raw.githubusercontent.com/Stelliro/PuffinPyEditor/main/zips/source_control_ui.zip"
+    }
+]

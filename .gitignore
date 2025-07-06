@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -57,3 +58,9 @@ venv.bak/
 /update.zip
 /update_temp/
 puffin_editor_settings.json
+=======
+# Ignore common temp files
+*.tmp, *.bak, *~
+# Ignore local environment
+venv/, .venv/
+>>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
