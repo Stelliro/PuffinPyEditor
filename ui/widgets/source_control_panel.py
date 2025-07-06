@@ -37,7 +37,7 @@ class ProjectSourceControlPanel(QWidget):
         self.api = puffin_api
         self.staged_color = QColor("#A7C080")
         self.unstaged_color = QColor("#DBBC7F")
-        self.conflicted_color = QColor("#E53935")
+        self.conflicted_color = QColor("#E53935") # Added color for conflicts
         self._setup_ui()
         self._connect_signals()
         self.update_icons()
@@ -120,7 +120,6 @@ class ProjectSourceControlPanel(QWidget):
         self.pull_button.clicked.connect(self._on_pull_clicked)
         self.new_release_button.clicked.connect(self._on_new_release_clicked)
         self.commit_button.clicked.connect(self._on_commit_clicked)
-        # NEW CONNECTIONS
         self.force_push_button.clicked.connect(self._on_force_push_clicked)
         self.abort_merge_button.clicked.connect(self._on_abort_merge_clicked)
         self.cleanup_tags_button.clicked.connect(self._on_cleanup_tags_clicked)
@@ -128,7 +127,7 @@ class ProjectSourceControlPanel(QWidget):
 
     def set_ui_locked(self, locked: bool, message: str = ""):
         for button in self.action_buttons:
-            if button != self.abort_merge_button: # Keep abort enabled
+            if button != self.abort_merge_button: 
                 button.setEnabled(not locked)
         self.commit_message_edit.setEnabled(not locked)
         self.status_label.setText(message)
@@ -140,7 +139,6 @@ class ProjectSourceControlPanel(QWidget):
         self.new_release_button.setIcon(qta.icon('mdi.tag-outline'))
         self.cleanup_tags_button.setIcon(qta.icon('mdi.tag-remove-outline'))
         self.commit_button.setIcon(qta.icon('mdi.check'))
-        # NEW ICONS
         self.force_push_button.setIcon(qta.icon('mdi.upload-off-outline', color='orange'))
         self.abort_merge_button.setIcon(qta.icon('mdi.close-octagon-outline', color='red'))
 
@@ -211,7 +209,8 @@ class ProjectSourceControlPanel(QWidget):
         if not path or not message:
             QMessageBox.warning(self, "Commit Failed", "A project must be selected and a commit message must be provided.")
             return
-
+            
+        # FIX: The manager now handles the author, so we don't need to create the Actor here.
         self.set_ui_locked(True, f"Committing changes in {os.path.basename(path)}...")
         self.git_manager.commit_files(path, message)
 
@@ -338,7 +337,6 @@ class ProjectSourceControlPanel(QWidget):
             if item_data and item_data.get('path') == repo_path:
                 project_item.takeChildren()
                 
-                # Show/hide the Abort Merge button based on repository state
                 repo = Repo(repo_path)
                 is_merging = os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD'))
                 self.abort_merge_button.setVisible(is_merging)
