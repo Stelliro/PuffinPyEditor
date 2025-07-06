@@ -3,7 +3,8 @@ import os
 from typing import List, Dict, Optional
 from git import Repo, InvalidGitRepositoryError, Actor
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTreeWidget,
-                             QTreeWidgetItem, QMenu, QMessageBox, QLabel, QHeaderView, QLineEdit, QComboBox)
+                             QTreeWidgetItem, QMenu, QMessageBox, QLabel, QHeaderView, QLineEdit, QComboBox,
+                             QSizePolicy) # <-- FIX: Added QSizePolicy
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 import qtawesome as qta
@@ -67,12 +68,14 @@ class ProjectSourceControlPanel(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         layout.addWidget(self.project_tree)
 
-        # FIX: Replace QLineEdit with an editable QComboBox for history
         self.commit_message_edit = QComboBox()
         self.commit_message_edit.setEditable(True)
         self.commit_message_edit.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.commit_message_edit.setToolTip("Enter a commit message or select a previous one.")
         self.commit_message_edit.lineEdit().setPlaceholderText("Commit message...")
+        # Make the combobox expand to fill space
+        self.commit_message_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
 
         self.commit_button = QPushButton("Commit All")
         commit_layout = QHBoxLayout()
@@ -130,6 +133,7 @@ class ProjectSourceControlPanel(QWidget):
     def _get_selected_project_path(self) -> Optional[str]:
         item = self.project_tree.currentItem()
         if not item:
+            # Fallback to the active project if no specific item is selected in the SC panel
             return self.project_manager.get_active_project_path()
         while parent := item.parent():
             item = parent
@@ -152,8 +156,13 @@ class ProjectSourceControlPanel(QWidget):
 
     def _on_commit_clicked(self):
         path = self._get_selected_project_path()
-        # FIX: Get text from the QComboBox's currentText method
         message = self.commit_message_edit.currentText().strip()
+
+        # Simple validation for a common user error
+        if message.lower().startswith("git commit"):
+             QMessageBox.warning(self, "Invalid Message", "Please enter only the commit message, not the full 'git commit' command.")
+             return
+
         if not path or not message:
             QMessageBox.warning(self, "Commit Failed", "A project must be selected "
                                 "and a commit message must be provided.")
@@ -227,7 +236,7 @@ class ProjectSourceControlPanel(QWidget):
 
         self.set_ui_locked(False, f"Success: {message}")
         
-        # FIX: Add commit message to history on successful commit
+        # Add commit message to history on successful commit
         if "committed" in message.lower() and not data.get('no_changes'):
             commit_message = self.commit_message_edit.currentText().strip()
             history = settings_manager.get("commit_message_history", [])
@@ -242,8 +251,15 @@ class ProjectSourceControlPanel(QWidget):
 
 
     def _handle_git_error(self, error_message: str):
-        self.set_ui_locked(False, f"Error: {error_message}")
-        QMessageBox.critical(self, "Operation Failed", error_message)
+        self.set_ui_locked(False, "Operation Failed.")
+        # Create a message box that can display rich text to show the error nicely.
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Critical)
+        msg_box.setWindowTitle("Operation Failed")
+        msg_box.setText("A Git operation failed to complete.")
+        # Use HTML to format the error message for better readability.
+        msg_box.setInformativeText(f"<b>Reason:</b><br><pre>{error_message}</pre>")
+        msg_box.exec()
         self.refresh_all_projects()
 
     def refresh_all_projects(self):
@@ -294,9 +310,22 @@ class ProjectSourceControlPanel(QWidget):
             item_data = project_item.data(0, Qt.ItemDataRole.UserRole)
             if item_data and item_data.get('path') == repo_path:
                 project_item.takeChildren()
-                for f in sorted(list(set(staged + unstaged))):
-                    child = QTreeWidgetItem(project_item, [f])
-                    child.setForeground(0, self.staged_color if f in staged else self.unstaged_color)
+                # Create 'Staged' header if there are staged files
+                if staged:
+                    staged_header = QTreeWidgetItem(project_item, ["Staged Changes"])
+                    staged_header.setForeground(0, self.staged_color)
+                    for f in sorted(staged):
+                        child = QTreeWidgetItem(staged_header, [f])
+                        child.setForeground(0, self.staged_color)
+
+                # Create 'Unstaged' header if there are unstaged files
+                if unstaged:
+                    unstaged_header = QTreeWidgetItem(project_item, ["Changes"])
+                    unstaged_header.setForeground(0, self.unstaged_color)
+                    for f in sorted(unstaged):
+                        child = QTreeWidgetItem(unstaged_header, [f])
+                        child.setForeground(0, self.unstaged_color)
+
                 project_item.setExpanded(True)
                 break
 

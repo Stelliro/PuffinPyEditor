@@ -96,7 +96,6 @@ class GitWorker(QObject):
             repo = Repo(repo_path)
             repo.git.add(A=True)
             if repo.is_dirty(untracked_files=True):
-                # The committer is now passed in directly.
                 repo.index.commit(message, author=author, committer=author)
                 self.operation_success.emit(
                     "Changes committed", {'repo_path': repo_path}
@@ -107,7 +106,7 @@ class GitWorker(QObject):
                     {'repo_path': repo_path, 'no_changes': True}
                 )
         except GitCommandError as e:
-            self.error_occurred.emit(f"Git Commit failed: {e}")
+            self.error_occurred.emit(f"Git Commit failed: {e.stderr}")
 
     def push(self, repo_path: str, tag_name: Optional[str] = None):
         try:
@@ -153,7 +152,18 @@ class GitWorker(QObject):
             self.operation_success.emit("Pull successful", {})
             self.get_status(repo_path)
         except GitCommandError as e:
-            self.error_occurred.emit(f"Git Pull failed: {e}")
+            # FIX: Provide detailed error messages for common pull failures
+            stderr = str(e.stderr).lower()
+            if "authentication failed" in stderr:
+                msg = ("Authentication failed. Please ensure you have configured a "
+                       "Git Credential Manager or are using SSH for your remote URL.")
+            elif "you have unstaged changes" in stderr or "your local changes to the following files would be overwritten" in stderr:
+                msg = "Pull failed. You have local changes that would be overwritten. Please commit or stash them first."
+            elif "pull is not possible because you have unmerged files" in stderr:
+                msg = "Pull failed because you have unresolved merge conflicts. Please resolve the conflicts, commit the result, and then try again."
+            else:
+                msg = f"Git Pull failed. Stderr: {e.stderr.strip()}"
+            self.error_occurred.emit(msg)
 
     def clone_repo(self, url: str, path: str, branch: Optional[str] = None):
         try:

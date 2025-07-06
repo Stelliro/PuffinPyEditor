@@ -115,4 +115,4 @@ def get_best_available_font(preferred_list: List[str]) -> Optional[str]:
         f"Could not find any of the preferred fonts: {preferred_list}. "
         "The application will use a system default."
     )
-    return None
+    return Nones
