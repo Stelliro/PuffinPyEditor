@@ -8,7 +8,7 @@ from git import Actor
 from PyQt6.QtWidgets import (QInputDialog, QMessageBox, QTextEdit, QDialog,
                              QVBoxLayout, QLabel, QProgressBar, QPushButton,
                              QDialogButtonBox)
-from PyQt6.QtCore import Qt, QCoreApplication, QProcess, QTimer
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 
 from app_core.puffin_api import PuffinPluginAPI
@@ -21,37 +21,31 @@ import sys
 
 class UploadProgressDialog(QDialog):
     """A dialog to show the real-time progress of an asset upload."""
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Release Progress")
         self.setMinimumWidth(600)
         self.setModal(True)
         self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
-
         layout = QVBoxLayout(self)
-
         self.step_label = QLabel("Starting release...")
         font = self.step_label.font()
         font.setBold(True)
         self.step_label.setFont(font)
         layout.addWidget(self.step_label)
-
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setTextVisible(False)
         layout.addWidget(self.progress_bar)
-
         self.log_console = QTextEdit()
         self.log_console.setReadOnly(True)
         self.log_console.setFont(QFont("Consolas", 9))
         self.log_console.setStyleSheet("background-color: #1e1e1e; color: #d4d4d4;")
         layout.addWidget(self.log_console)
-
         self.button_box = QDialogButtonBox()
         self.close_button = self.button_box.addButton("Close", QDialogButtonBox.ButtonRole.RejectRole)
         self.close_button.clicked.connect(self.reject)
-        self.close_button.hide()  # Hide until process is complete
+        self.close_button.hide()
         layout.addWidget(self.button_box)
 
     def set_step(self, step_name: str):
@@ -77,13 +71,8 @@ class GitHubToolsPlugin:
         self.github_dialog = None
         self._release_state = {}
         self.build_process = None
-        self.build_output_buffer = []
         self.progress_dialog = None
-
         self.api.log_info("GitHub Tools plugin initialized.")
-        self.api.add_menu_action("tools", "Build Project Installer", self._show_build_installer_dialog,
-                                 icon_name="fa5s.cogs")
-
         if sc_panel := self._get_sc_panel():
             sc_panel.create_release_requested.connect(self.show_create_release_dialog)
             sc_panel.publish_repo_requested.connect(self._publish_repo)
@@ -92,8 +81,7 @@ class GitHubToolsPlugin:
             self.api.log_info("GitHub Tools: Connected signals from Source Control Panel.")
 
     def _get_sc_panel(self):
-        if hasattr(self.main_window, 'source_control_panel'): return self.main_window.source_control_panel
-        return None
+        return getattr(self.main_window, 'source_control_panel', None)
 
     def _log_to_dialog(self, message: str, is_error: bool = False):
         log_func = self.api.log_error if is_error else self.api.log_info
@@ -101,488 +89,335 @@ class GitHubToolsPlugin:
         if self.progress_dialog:
             self.progress_dialog.add_log(message, is_error)
 
-    def ensure_git_identity(self, project_path: str, log_to_dialog=False) -> bool:
-        log_func = self._log_to_dialog if log_to_dialog else self.api.log_info
-        log_func("Verifying Git identity for contributions...")
-
+    def ensure_git_identity(self, project_path: str) -> bool:
         user_info = self.github_manager.get_user_info()
-        if not user_info or not user_info.get('login'):
-            self.api.show_message("warning", "GitHub Login Required",
-                                  "You must be logged into GitHub to ensure your commits are counted as contributions.")
+        if not (user_info and user_info.get('login')):
+            self.api.show_message("warning", "GitHub Login Required", "You must be logged into GitHub.")
             return False
-
-        valid_emails = set()
-        user_name = user_info.get('login')
-        public_email = user_info.get('email')
-        noreply_email = f"{user_info.get('id')}+{user_name}@users.noreply.github.com"
-
-        if public_email:
+        user_name, user_id = user_info.get('login'), user_info.get('id')
+        valid_emails = {f"{user_id}+{user_name}@users.noreply.github.com"}
+        if public_email := user_info.get('email'):
             valid_emails.add(public_email.lower())
-        valid_emails.add(noreply_email.lower())
-
         try:
             repo = git.Repo(project_path)
-            current_email = ""
-            try:
-                with repo.config_reader() as cr:
-                    current_email = cr.get_value('user', 'email', '').lower()
-            except (configparser.NoSectionError, configparser.NoOptionError):
-                log_func("No local or global git email is set.")
-                pass
-
+            with repo.config_reader() as cr:
+                current_email = cr.get_value('user', 'email', '').lower()
             if current_email not in valid_emails:
-                log_func(
-                    f"Current git email ('{current_email}') is not valid for contributions. Updating local config.")
-                with repo.config_writer() as config:
-                    config.set_value('user', 'name', user_name)
-                    config.set_value('user', 'email', noreply_email)
-                log_func(f"Successfully set local git identity to '{user_name} <{noreply_email}>'.")
-            else:
-                log_func(f"Verified Git identity is correctly set to '{current_email}'.")
-
+                with repo.config_writer() as cw:
+                    cw.set_value('user', 'name', user_name)
+                    cw.set_value('user', 'email', next(iter(valid_emails)))
+                self.api.show_status_message("Updated local Git identity for GitHub.", 3000)
             return True
-
         except Exception as e:
-            self.api.show_message("critical", "Git Configuration Error",
-                                  f"Could not verify or set Git configuration: {e}")
+            self.api.show_message("critical", "Git Config Error", f"Could not set Git identity: {e}")
             return False
 
     def show_create_release_dialog(self, project_path: str = None):
         if not project_path: project_path = self.project_manager.get_active_project_path()
         if not project_path:
-            self.api.show_message("info", "No Project Open", "Please open a project to create a release.")
+            self.api.show_message("info", "No Project", "Please open a project to create a release.")
             return
-        self._create_release(project_path)
+        if self._run_release_preflight_checks(project_path):
+            self._start_release_process(project_path)
 
-    def _create_release(self, project_path):
+    def _run_release_preflight_checks(self, path: str) -> bool:
+        self.api.show_status_message("Running release pre-flight checks...")
         try:
-            repo = git.Repo(project_path)
-
-            is_modified = repo.is_dirty(untracked_files=False)
-            relevant_untracked_files = repo.untracked_files
-
-            if is_modified or relevant_untracked_files:
-                error_details = []
-                if is_modified:
-                    modified_files_list = [item.a_path for item in repo.index.diff(None)]
-                    error_details.append(f"• {len(modified_files_list)} modified file(s) exist.")
-                if relevant_untracked_files:
-                    error_details.append(f"• {len(relevant_untracked_files)} untracked file(s) exist.")
-
-                self.api.show_message(
-                    "critical", "Uncommitted Changes",
-                    "Your repository has changes that must be committed or stashed before creating a release.\n\n" +
-                    "\n".join(error_details)
-                )
-                return
-
+            repo = git.Repo(path)
+            if repo.is_dirty(untracked_files=True):
+                self.api.show_message("critical", "Uncommitted Changes", "Commit or stash changes before creating a release.")
+                return False
             if os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD')):
-                msg_box = QMessageBox(self.main_window)
-                msg_box.setIcon(QMessageBox.Icon.Warning)
-                msg_box.setTextFormat(Qt.TextFormat.RichText)
-                msg_box.setWindowTitle("Unresolved Merge")
-                msg_box.setText("Your repository has an unresolved merge conflict.")
-                msg_box.setInformativeText(
-                    "To proceed, you must resolve this state.<br><br>"
-                    "• <b>Abort Merge:</b> This will cancel the merge and revert your project to the state before the merge began. This is a safe option if you are unsure.<br><br>"
-                    "• <b>Cancel:</b> Do nothing. You will need to resolve the conflicts manually (e.g., using the command line) before you can proceed."
-                )
-                abort_button = msg_box.addButton("Abort Merge", QMessageBox.ButtonRole.DestructiveRole)
-                cancel_button = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-                msg_box.setDefaultButton(cancel_button)
-
-                msg_box.exec()
-
-                if msg_box.clickedButton() == abort_button:
-                    try:
-                        self.api.log_info("User chose to abort the merge.")
-                        repo.git.merge('--abort')
-                        self.api.show_message(
-                            "info", "Merge Aborted",
-                            "The merge has been successfully aborted. Your repository is now in a clean state. Please try creating the release again."
-                        )
-                    except git.GitCommandError as e:
-                        self.api.log_error(f"Failed to abort merge: {e}")
-                        self.api.show_message(
-                            "critical", "Abort Failed",
-                            f"Could not abort the merge. Please check the logs or use the command line.\n\nError: {e.stderr}"
-                        )
-                return
+                if not self._handle_unresolved_merge(repo): return False
+            if not repo.remotes:
+                self.api.show_message("critical", "No Remote", "This project has no remote repository configured.")
+                return False
+            if not self._handle_branch_sync(repo): return False
+            self.api.show_status_message("Pre-flight checks passed.", 2000)
+            return True
         except Exception as e:
-            self.api.show_message("critical", "Repository Error", f"Could not check repository status: {e}")
-            return
+            self.api.show_message("critical", "Pre-flight Check Failed", f"An unexpected error occurred: {e}")
+            return False
 
+    def _handle_unresolved_merge(self, repo: git.Repo) -> bool:
+        msg_box = QMessageBox(self.main_window)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setTextFormat(Qt.TextFormat.RichText)
+        msg_box.setWindowTitle("Unresolved Merge")
+        msg_box.setText("Your repository has an unresolved merge conflict.")
+        msg_box.setInformativeText(
+            "To proceed, you must resolve this state.<br><br><b>Abort Merge:</b> This is a safe option that will cancel the merge.")
+        abort_button = msg_box.addButton("Abort Merge", QMessageBox.ButtonRole.DestructiveRole)
+        msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        msg_box.exec()
+        if msg_box.clickedButton() == abort_button:
+            try:
+                repo.git.merge('--abort')
+                self.api.show_message("info", "Merge Aborted", "The merge was aborted. Please try the release again.")
+            except git.GitCommandError as e:
+                self.api.show_message("critical", "Abort Failed", f"Could not abort merge: {e.stderr}")
+            return False
+        return False
+
+    def _handle_branch_sync(self, repo: git.Repo) -> bool:
+        self.api.show_status_message("Checking remote status...")
+        repo.remotes.origin.fetch()
+        active_branch = repo.active_branch
+        tracking = active_branch.tracking_branch()
+        if not tracking:
+            self.api.show_message("warning", "Upstream Not Set", f"Local branch '{active_branch.name}' is not tracking a remote branch.")
+            return False
+        if active_branch.commit != tracking.commit:
+            reply = QMessageBox.question(self.main_window, "Branch Diverged",
+                                         f"Your local branch '{active_branch.name}' is not in sync with the remote. Pull changes now?",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.api.show_status_message("Pulling changes...")
+                self.git_manager.pull(repo.working_dir)
+                return False
+            else:
+                return False
+        return True
+
+    def _start_release_process(self, project_path: str):
+        if not self.ensure_git_identity(project_path): return
         dialog = NewReleaseDialog(project_path, self.git_manager, self.main_window)
         if not dialog.exec():
             self.api.show_status_message("Release cancelled.", 3000)
             return
-
+        
         self.progress_dialog = UploadProgressDialog(self.main_window)
         self.progress_dialog.show()
-
-        if not self.ensure_git_identity(project_path, log_to_dialog=True):
-            self._on_release_step_failed("Git identity misconfiguration. Commit cannot be created.")
-            return
-
+        
         try:
             repo = git.Repo(project_path)
-            if not repo.remotes: self._on_release_step_failed("This project has no remote repository."); return
             remote_url = repo.remotes.origin.url
-            if 'github.com' not in remote_url: self._on_release_step_failed(
-                "The 'origin' remote is not a GitHub repository."); return
             owner, repo_name = self.git_manager.parse_git_url(remote_url)
-            if not owner or not repo_name: self._on_release_step_failed(
-                "Could not parse owner/repo from remote."); return
+            if not owner or not repo_name:
+                self._on_release_step_failed("Could not parse owner/repo from remote URL.")
+                return
         except Exception as e:
-            self._on_release_step_failed(f"Could not analyze repository: {e}");
+            self._on_release_step_failed(f"Could not analyze repository: {e}")
             return
-
-        self._release_state = {'dialog_data': dialog.get_release_data(), 'project_path': project_path, 'owner': owner,
-                               'repo_name': repo_name, 'step': None}
-        self._advance_release_state("PULL_CHANGES")
+            
+        self._release_state = {'dialog_data': dialog.get_release_data(), 'project_path': project_path,
+                               'owner': owner, 'repo_name': repo_name}
+        self._advance_release_state("BUMP_VERSION_COMMIT")
 
     def _advance_release_state(self, next_step):
         self._release_state['step'] = next_step
-        step = next_step
-        dialog_data, project_path = self._release_state['dialog_data'], self._release_state['project_path']
-        self._cleanup_all_connections()
-        step_title = step.replace('_', ' ').title()
+        step_title = next_step.replace('_', ' ').title()
+        self._log_to_dialog(f"Starting step: {step_title}")
         if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(True, f"Step: {step_title}...")
-        if self.progress_dialog: self.progress_dialog.set_step(step_title)
+        
+        dialog_data = self._release_state['dialog_data']
+        project_path = self._release_state['project_path']
+        
+        try:
+            repo = git.Repo(project_path)
+            with repo.config_reader() as cr:
+                author = Actor(cr.get_value('user', 'name'), cr.get_value('user', 'email'))
+        except Exception as e:
+            self._on_release_step_failed(f"Could not read Git author info: {e}")
+            return
 
-        author = self._release_state.get('author')
-        if not author:
-            try:
-                repo = git.Repo(project_path)
-                with repo.config_reader() as cr:
-                    name = cr.get_value('user', 'name')
-                    email = cr.get_value('user', 'email')
-                author = Actor(name, email)
-                self._release_state['author'] = author
-            except Exception as e:
-                self._on_release_step_failed(f"Could not read Git author info: {e}")
-                return
+        self._cleanup_connections()
+        self.git_manager.git_success.connect(self._on_git_step_success)
+        self.git_manager.git_error.connect(self._on_release_step_failed)
 
-        if step == "PULL_CHANGES":
-            self.git_manager.git_success.connect(self._on_release_step_succeeded)
-            self.git_manager.git_error.connect(self._on_release_step_failed)
-            self.git_manager.pull(project_path)
-        elif step == "BUMP_VERSION_COMMIT":
+        if step == "BUMP_VERSION_COMMIT":
             if not versioning.write_new_version(dialog_data['tag']):
-                self._on_release_step_failed("Failed to write new version to VERSION.txt.")
+                self._on_release_step_failed("Failed to write new version to VERSION.txt")
                 return
             self.main_window._update_window_title()
-            self.git_manager.git_success.connect(self._on_release_step_succeeded)
-            self.git_manager.git_error.connect(self._on_release_step_failed)
             self.git_manager.commit_files(project_path, f"ci: Release {dialog_data['tag']}", author)
-
         elif step == "PUSH_MAIN_BRANCH":
-            self.git_manager.git_success.connect(self._on_release_step_succeeded)
-            self.git_manager.git_error.connect(self._on_release_step_failed)
             self.git_manager.push(project_path)
-
         elif step == "CREATE_TAG":
-            self.git_manager.git_success.connect(self._on_release_step_succeeded)
-            self.git_manager.git_error.connect(self._on_release_step_failed)
             self.git_manager.create_tag(project_path, dialog_data['tag'], dialog_data['title'], author)
-
         elif step == "PUSH_TAG":
-            self.git_manager.git_success.connect(self._on_release_step_succeeded)
-            self.git_manager.git_error.connect(self._on_release_step_failed)
             self.git_manager.push_specific_tag(project_path, dialog_data['tag'])
-
         elif step == "CREATE_RELEASE":
-            self.github_manager.operation_success.connect(self._on_release_step_succeeded)
+            self._cleanup_connections()
+            self.github_manager.operation_success.connect(self._on_github_step_success)
             self.github_manager.operation_failed.connect(self._on_release_step_failed)
             self.github_manager.create_github_release(
-                owner=self._release_state['owner'], repo=self._release_state['repo_name'], tag_name=dialog_data['tag'],
-                name=dialog_data['title'], body=dialog_data['notes'], prerelease=dialog_data['prerelease'])
-
+                owner=self._release_state['owner'], repo=self._release_state['repo_name'],
+                tag_name=dialog_data['tag'], name=dialog_data['title'],
+                body=dialog_data['notes'], prerelease=dialog_data['prerelease'])
         elif step == "BUILD_ASSETS":
             self._run_build_script(project_path)
-
         elif step == "UPLOAD_ASSETS":
             self._upload_assets()
 
-    def _on_release_step_succeeded(self, msg, data):
-        step = self._release_state.get('step')
+    def _on_git_step_success(self, msg, data):
+        step = self._release_state['step']
         self._log_to_dialog(f"SUCCESS on step '{step}': {msg}")
+        step_map = {
+            "BUMP_VERSION_COMMIT": "PUSH_MAIN_BRANCH", "PUSH_MAIN_BRANCH": "CREATE_TAG",
+            "CREATE_TAG": "PUSH_TAG", "PUSH_TAG": "CREATE_RELEASE",
+        }
+        if next_step := step_map.get(step):
+            self._advance_release_state(next_step)
 
-        if step == "PULL_CHANGES":
-            self._advance_release_state("BUMP_VERSION_COMMIT")
-        elif step == "BUMP_VERSION_COMMIT":
-            self._advance_release_state("PUSH_MAIN_BRANCH")
-        elif step == "PUSH_MAIN_BRANCH":
-            self._advance_release_state("CREATE_TAG")
-        elif step == "CREATE_TAG":
-            self._advance_release_state("PUSH_TAG")
-        elif step == "PUSH_TAG":
-            self._advance_release_state("CREATE_RELEASE")
-        elif step == "CREATE_RELEASE":
+    def _on_github_step_success(self, msg, data):
+        step = self._release_state['step']
+        self._log_to_dialog(f"SUCCESS on step '{step}': {msg}")
+        if step == "CREATE_RELEASE":
             self._release_state['release_info'] = data.get("release_data", {})
-            self._advance_release_state(
-                "BUILD_ASSETS" if self._release_state['dialog_data'].get("build_installer") else "UPLOAD_ASSETS")
+            next_step = "BUILD_ASSETS" if self._release_state['dialog_data'].get("build_installer") else "UPLOAD_ASSETS"
+            self._advance_release_state(next_step)
         elif step == "UPLOAD_ASSET":
             self._upload_next_asset()
 
     def _run_build_script(self, project_path):
         build_script_path = os.path.join(project_path, "installer", "build.py")
         if not os.path.exists(build_script_path):
-            self._on_release_step_failed(f"Build script not found at '{build_script_path}'.")
+            self._on_release_step_failed(f"Build script not found: '{build_script_path}'. Skipping asset build.")
+            self._advance_release_state("UPLOAD_ASSETS")
             return
-
-        self.build_output_buffer.clear()
-        args = []
+        
+        args = ["--version", self._release_state['dialog_data']['tag'].lstrip('v')]
         if self.api.get_manager("settings").get("cleanup_after_build", True):
             args.append("--cleanup")
-
-        version_str = self._release_state['dialog_data']['tag'].lstrip('v')
-        args.extend(["--version", version_str])
-
         if nsis_path := self.api.get_manager("settings").get("nsis_path"):
             args.extend(["--nsis-path", nsis_path])
 
-        self.build_process = QProcess()
-        self.build_process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
-        self.build_process.readyReadStandardOutput.connect(self._on_build_stdout)
-        self.build_process.finished.connect(self._on_build_finished)
-
-        self.build_process.setWorkingDirectory(project_path)
-        program = sys.executable
-        command_args = [build_script_path] + args
-        self._log_to_dialog(
-            f"Executing build in '{project_path}': {os.path.basename(program)} {' '.join(command_args)}")
-
-        self.build_process.start(program, command_args)
-
-    def _on_build_stdout(self):
-        output = self.build_process.readAllStandardOutput().data().decode(errors='ignore');
-        self.build_output_buffer.append(output);
-        self._log_to_dialog(f"[Build] {output.strip()}")
+        self.process = QProcess()
+        self.process.readyReadStandardOutput.connect(lambda: self._log_to_dialog(f"[Build] {self.process.readAllStandardOutput().data().decode().strip()}"))
+        self.process.finished.connect(self._on_build_finished)
+        self.process.start(sys.executable, [build_script_path] + args)
 
     def _on_build_finished(self, exit_code, exit_status):
         if exit_code == 0:
-            self._log_to_dialog("Build successful.");
+            self._log_to_dialog("Build successful.")
             self._advance_release_state("UPLOAD_ASSETS")
         else:
-            self._show_build_error_dialog("The build script failed. See details below.",
-                                          "".join(self.build_output_buffer));
-            self._on_release_step_failed(
-                f"Build script failed with exit code {exit_code}.")
-        self.build_process.deleteLater();
-        self.build_process = None
-
-    def _show_build_error_dialog(self, summary: str, details: str):
-        self._log_to_dialog(f"ERROR: {summary}", is_error=True);
-        dialog = QMessageBox(self.main_window)
-        dialog.setIcon(QMessageBox.Icon.Critical)
-        dialog.setWindowTitle("Build Failed")
-        dialog.setText(summary)
-        dialog.layout().setColumnStretch(1, 1)
-        text_edit = QTextEdit()
-        text_edit.setReadOnly(True)
-        text_edit.setFont(QFont("Consolas", 9))
-        text_edit.setText(details)
-        text_edit.setMinimumSize(600, 300)
-        dialog.layout().addWidget(text_edit, 1, 0, 1, -1)
-        dialog.exec()
-
-    def _show_build_installer_dialog(self):
-        project_path = self.project_manager.get_active_project_path()
-        if not project_path: self.api.show_message("info", "No Project", "Please open a project."); return
-        if QMessageBox.question(self.main_window, "Confirm Build", "This will run the project's full build. Continue?",
-                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel) == QMessageBox.StandardButton.Yes:
-            self._release_state = {'dialog_data': {'tag': f"v{versioning.APP_VERSION}", 'build_installer': True},
-                                   'project_path': project_path}
-            self.progress_dialog = UploadProgressDialog(self.main_window);
-            self.progress_dialog.show()
-            self._run_build_script(project_path)
+            self._on_release_step_failed(f"Build script failed with exit code {exit_code}.")
 
     def _upload_assets(self):
-        assets_to_upload = []
-        dialog_data = self._release_state['dialog_data']
-        project_path = self._release_state['project_path']
-
+        assets = []
+        dialog_data, project_path = self._release_state['dialog_data'], self._release_state['project_path']
         if dialog_data.get("build_installer"):
             dist_path = os.path.join(project_path, "dist")
-            version_str = dialog_data['tag'].lstrip('v')
-            installer_name = f"PuffinPyEditor_v{version_str}_Setup.exe"
+            installer_name = f"PuffinPyEditor_v{dialog_data['tag'].lstrip('v')}_Setup.exe"
             installer_path = os.path.join(dist_path, installer_name)
-
             if os.path.exists(installer_path):
-                assets_to_upload.append(installer_path)
+                assets.append(installer_path)
             else:
-                self._on_release_step_failed(
-                    f"Installer not found at '{installer_path}'. Build may have failed or produced an unexpected filename.")
-                return
-
-        repo_name = self._release_state['repo_name']
+                self._log_to_dialog(f"Installer not found at '{installer_path}'. Skipping.", is_warning=True)
         try:
-            temp_zip_dir = tempfile.mkdtemp()
-            self._release_state['temp_dir'] = temp_zip_dir
-            zip_name = f"{repo_name}-{dialog_data['tag']}.zip"
-            zip_path = os.path.join(temp_zip_dir, zip_name)
-
-            if self.project_manager.create_project_zip(zip_path):
-                assets_to_upload.append(zip_path)
-            else:
-                self._log_to_dialog("Warning: Failed to create source code zip asset.", is_error=True)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                zip_path = os.path.join(temp_dir, f"{self._release_state['repo_name']}-{dialog_data['tag']}.zip")
+                if self.project_manager.create_project_zip(zip_path):
+                    shutil.move(zip_path, self.project_manager.get_active_project_path())
+                    final_path = os.path.join(self.project_manager.get_active_project_path(), os.path.basename(zip_path))
+                    assets.append(final_path)
+                    self._release_state['temp_zip_path'] = final_path
+                else:
+                    self._log_to_dialog("Failed to create source code zip.", is_warning=True)
         except Exception as e:
             self._log_to_dialog(f"Error creating source zip: {e}", is_error=True)
 
-        if not assets_to_upload:
-            self._log_to_dialog("No assets to upload, finishing release.")
+        if not assets:
+            self._log_to_dialog("No assets to upload. Finishing release.")
             self._cleanup_release_process(success=True)
             return
 
-        self._release_state['asset_queue'] = assets_to_upload
-        self._log_to_dialog(f"Found {len(assets_to_upload)} asset(s) to upload.")
+        self._release_state['asset_queue'] = assets
         self._upload_next_asset()
 
     def _upload_next_asset(self):
-        asset_queue = self._release_state.get('asset_queue', [])
-        if not asset_queue:
-            self._log_to_dialog("All assets uploaded successfully.")
+        if not self._release_state.get('asset_queue'):
+            self._log_to_dialog("All assets uploaded.")
             self._cleanup_release_process(success=True)
             return
-        asset_path, upload_url = asset_queue.pop(0), self._release_state['release_info']['upload_url']
-        if self.progress_dialog: self.progress_dialog.set_step(f"Uploading {os.path.basename(asset_path)}")
+        
+        asset_path = self._release_state['asset_queue'].pop(0)
+        self._log_to_dialog(f"Uploading asset: {os.path.basename(asset_path)}...")
         self._release_state['step'] = "UPLOAD_ASSET"
-        self.github_manager.operation_success.connect(self._on_release_step_succeeded)
+        self._cleanup_connections()
+        self.github_manager.operation_success.connect(self._on_github_step_success)
         self.github_manager.operation_failed.connect(self._on_release_step_failed)
-        self.github_manager.upload_asset(upload_url, asset_path)
+        self.github_manager.upload_asset(self._release_state['release_info']['upload_url'], asset_path)
 
     def _on_release_step_failed(self, error_message):
-        step = self._release_state.get('step', 'UNKNOWN');
-        failure_msg = f"An error occurred at step '{step}': {error_message}"
-        self._log_to_dialog(failure_msg, is_error=True)
-        if self.progress_dialog: self.progress_dialog.show_close_button();
-        if step in ["BUMP_VERSION_COMMIT",
-                    "FINAL_PUSH"]: failure_msg += "\n\nA local commit may have been created. You might need to undo it manually (e.g., 'git reset HEAD~1')."
-        self.api.show_message("critical", "Release Failed", f"{failure_msg}\n\nAttempting to roll back...")
-
-        # FIX: Make the rollback logic aware of the release state.
+        step = self._release_state.get('step', 'UNKNOWN')
+        self._log_to_dialog(f"FAILED on step '{step}': {error_message}", is_error=True)
+        self.api.show_message("critical", "Release Failed", f"An error occurred at step '{step}'.\n\n{error_message}")
+        
+        # Smart Rollback Logic
         tag_name = self._release_state.get('dialog_data', {}).get('tag')
         release_id = self._release_state.get('release_info', {}).get('id')
-
-        # This check is correct: release_id is only set after CREATE_RELEASE succeeds.
+        
         if release_id:
             self._log_to_dialog(f"ROLLBACK: Deleting GitHub release ID {release_id}")
-            self.github_manager.delete_release(self._release_state['owner'], self._release_state['repo_name'],
-                                               release_id)
-
-        # Define the order of steps where artifacts are created.
-        created_local_tag_step = "CREATE_TAG"
-        pushed_tag_step = "PUSH_TAG"
-        created_release_step = "CREATE_RELEASE"
-
-        # A list of all steps that occur *after* the remote tag has been successfully pushed.
-        steps_after_push = [created_release_step, "BUILD_ASSETS", "UPLOAD_ASSETS", "UPLOAD_ASSET"]
-
-        # A list of all steps that occur *after* the local tag has been successfully created.
-        steps_after_local_tag = [pushed_tag_step] + steps_after_push
-
-        # Only delete the remote tag if the failure occurred AFTER it was pushed.
-        if tag_name and (step in steps_after_push or step == pushed_tag_step):
+            self.github_manager.delete_release(self._release_state['owner'], self._release_state['repo_name'], release_id)
+        
+        if tag_name and step in ["CREATE_RELEASE", "BUILD_ASSETS", "UPLOAD_ASSETS", "UPLOAD_ASSET"]:
             self._log_to_dialog(f"ROLLBACK: Deleting remote tag '{tag_name}'")
             self.git_manager.delete_remote_tag(self._release_state['project_path'], tag_name)
-
-        # Only delete the local tag if the failure occurred AFTER it was created.
-        if tag_name and (step in steps_after_local_tag or step == created_local_tag_step):
+        
+        if tag_name and step in ["PUSH_TAG", "CREATE_RELEASE", "BUILD_ASSETS", "UPLOAD_ASSETS", "UPLOAD_ASSET"]:
             self._log_to_dialog(f"ROLLBACK: Deleting local tag '{tag_name}'")
             self.git_manager.delete_tag(self._release_state['project_path'], tag_name)
+            
+        self._cleanup_release_process(success=False)
 
-        self._cleanup_release_process()
-
-    def _cleanup_all_connections(self):
+    def _cleanup_connections(self):
         try:
-            self.git_manager.git_success.disconnect(self._on_release_step_succeeded)
-            self.git_manager.git_error.disconnect(self._on_release_step_failed)
-            self.github_manager.operation_success.disconnect(self._on_release_step_succeeded)
-            self.github_manager.operation_failed.disconnect(self._on_release_step_failed)
-        except TypeError:
-            pass
+            self.git_manager.git_success.disconnect()
+            self.git_manager.git_error.disconnect()
+            self.github_manager.operation_success.disconnect()
+            self.github_manager.operation_failed.disconnect()
+        except TypeError: pass
 
     def _cleanup_release_process(self, success=False):
-        self._log_to_dialog("Cleaning up release process state.")
-        self._cleanup_all_connections()
+        self._cleanup_connections()
         if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False, "Release process finished.")
         if self.progress_dialog:
-            if success:
-                self.progress_dialog.add_log("\n--- RELEASE COMPLETE ---")
-            else:
-                self.progress_dialog.add_log("\n--- RELEASE FAILED ---")
+            self.progress_dialog.add_log(f"\n--- RELEASE {'COMPLETE' if success else 'FAILED'} ---")
             self.progress_dialog.show_close_button()
             self.progress_dialog = None
-        if temp_dir := self._release_state.get('temp_dir'):
-            if os.path.exists(temp_dir): shutil.rmtree(temp_dir, ignore_errors=True); self._log_to_dialog(
-                f"Cleaned temp dir: {temp_dir}")
+        if zip_path := self._release_state.get('temp_zip_path'):
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+                self._log_to_dialog(f"Cleaned up temporary zip file: {zip_path}")
         self._release_state = {}
 
-    def _publish_repo(self, local_path):
-        repo_name, ok = QInputDialog.getText(self.main_window, "Publish to GitHub", "Repository Name:",
-                                             text=os.path.basename(local_path))
-        if not ok or not repo_name:
-            if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False, "Publish cancelled."); return
+    def _publish_repo(self, path):
+        repo_name, ok = QInputDialog.getText(self.main_window, "Publish to GitHub", "Repository Name:", text=os.path.basename(path))
+        if not (ok and repo_name): return
+        if not self.ensure_git_identity(path): return
+        desc, _ = QInputDialog.getText(self.main_window, "Description", "Description (optional):")
+        private = QMessageBox.question(self.main_window, "Visibility", "Make repository private?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+        self.github_manager.create_repo(repo_name, desc, private)
+        self.api.get_main_window().source_control_panel.set_ui_locked(True, f"Creating '{repo_name}'...")
+        # Connection for what happens after repo is created is now handled in SourceControlPanel via signals
 
-        if not self.ensure_git_identity(local_path):
-            if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False,
-                                                                        "Publish cancelled: Git identity not set.")
-            return
-
-        description, _ = QInputDialog.getText(self.main_window, "Publish to GitHub", "Description (optional):")
-        is_private = QMessageBox.question(self.main_window, "Visibility", "Make this repository private?",
-                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                                          QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
-
-        def on_repo_created(msg, data, path=local_path):
-            if "Repository" in msg and "created" in msg:
-                self._cleanup_all_connections();
-                clone_url = data.get("clone_url")
-                if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(True, "Linking and pushing...")
-                self.git_manager.publish_repo(path, clone_url)
-
-        self.github_manager.operation_success.connect(on_repo_created)
-        self.github_manager.operation_failed.connect(
-            lambda msg: self._get_sc_panel().set_ui_locked(False, f"Error: {msg}"))
-        if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(True, f"Creating '{repo_name}' on GitHub...")
-        self.github_manager.create_repo(repo_name, description, is_private)
-
-    def _link_repo(self, local_path):
+    def _link_repo(self, path):
+        if not self.ensure_git_identity(path): return
         dialog = SelectRepoDialog(self.github_manager, self.main_window)
         if dialog.exec() and (repo_data := dialog.selected_repo_data):
+            self.git_manager.link_to_remote(path, repo_data.get('clone_url'))
 
-            if not self.ensure_git_identity(local_path):
-                if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(False,
-                                                                            "Link cancelled: Git identity not set.")
-                return
-
-            if clone_url := repo_data.get('clone_url'):
-                if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(True, "Linking to remote...")
-                self.git_manager.link_to_remote(local_path, clone_url)
-
-    def _change_visibility(self, local_path):
+    def _change_visibility(self, path):
         try:
-            repo = git.Repo(local_path);
+            repo = git.Repo(path)
             if not repo.remotes: return
-            remote_url, (owner, repo_name) = repo.remotes.origin.url, self.git_manager.parse_git_url(remote_url)
-            if not owner or not repo_name: return
-            is_private = QMessageBox.question(self.main_window, "Change Visibility", "Make repository private?",
-                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
-            if sc_panel := self._get_sc_panel(): sc_panel.set_ui_locked(True, "Changing visibility...")
-            self.github_manager.update_repo_visibility(owner, repo_name, is_private)
+            owner, repo_name = self.git_manager.parse_git_url(repo.remotes.origin.url)
+            private = QMessageBox.question(self.main_window, "Visibility", "Make repository private?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
+            self.github_manager.update_repo_visibility(owner, repo_name, private)
         except Exception as e:
             self.api.show_message("critical", "Error", f"Could not get repository info: {e}")
 
     def _show_github_dialog(self):
         if not self.github_dialog:
             self.github_dialog = GitHubDialog(self.github_manager, self.git_manager, self.main_window)
-            self.github_dialog.project_cloned.connect(lambda path: self.project_manager.open_project(path))
+            self.github_manager.project_cloned.connect(self.project_manager.open_project)
         self.github_dialog.show()
 
-
 def initialize(puffin_api: PuffinPluginAPI):
-    """Initializes the GitHub Tools plugin."""
     plugin = GitHubToolsPlugin(puffin_api)
     puffin_api.add_menu_action("tools", "GitHub Repositories...", plugin._show_github_dialog, icon_name="fa5b.github")
     puffin_api.add_menu_action("tools", "New Release...", plugin.show_create_release_dialog, icon_name="fa5s.tag")
