@@ -460,16 +460,38 @@ class GitHubToolsPlugin:
         if step in ["BUMP_VERSION_COMMIT",
                     "FINAL_PUSH"]: failure_msg += "\n\nA local commit may have been created. You might need to undo it manually (e.g., 'git reset HEAD~1')."
         self.api.show_message("critical", "Release Failed", f"{failure_msg}\n\nAttempting to roll back...")
-        tag_name, release_id = self._release_state.get('dialog_data', {}).get('tag'), self._release_state.get(
-            'release_info', {}).get('id')
-        if release_id: self._log_to_dialog(
-            f"ROLLBACK: Deleting GitHub release ID {release_id}"); self.github_manager.delete_release(
-            self._release_state['owner'], self._release_state['repo_name'], release_id)
-        if tag_name and step != "CREATE_TAG": self._log_to_dialog(
-            f"ROLLBACK: Deleting remote tag '{tag_name}'"); self.git_manager.delete_remote_tag(
-            self._release_state['project_path'], tag_name)
-        if tag_name: self._log_to_dialog(f"ROLLBACK: Deleting local tag '{tag_name}'"); self.git_manager.delete_tag(
-            self._release_state['project_path'], tag_name)
+
+        # FIX: Make the rollback logic aware of the release state.
+        tag_name = self._release_state.get('dialog_data', {}).get('tag')
+        release_id = self._release_state.get('release_info', {}).get('id')
+
+        # This check is correct: release_id is only set after CREATE_RELEASE succeeds.
+        if release_id:
+            self._log_to_dialog(f"ROLLBACK: Deleting GitHub release ID {release_id}")
+            self.github_manager.delete_release(self._release_state['owner'], self._release_state['repo_name'],
+                                               release_id)
+
+        # Define the order of steps where artifacts are created.
+        created_local_tag_step = "CREATE_TAG"
+        pushed_tag_step = "PUSH_TAG"
+        created_release_step = "CREATE_RELEASE"
+
+        # A list of all steps that occur *after* the remote tag has been successfully pushed.
+        steps_after_push = [created_release_step, "BUILD_ASSETS", "UPLOAD_ASSETS", "UPLOAD_ASSET"]
+
+        # A list of all steps that occur *after* the local tag has been successfully created.
+        steps_after_local_tag = [pushed_tag_step] + steps_after_push
+
+        # Only delete the remote tag if the failure occurred AFTER it was pushed.
+        if tag_name and (step in steps_after_push or step == pushed_tag_step):
+            self._log_to_dialog(f"ROLLBACK: Deleting remote tag '{tag_name}'")
+            self.git_manager.delete_remote_tag(self._release_state['project_path'], tag_name)
+
+        # Only delete the local tag if the failure occurred AFTER it was created.
+        if tag_name and (step in steps_after_local_tag or step == created_local_tag_step):
+            self._log_to_dialog(f"ROLLBACK: Deleting local tag '{tag_name}'")
+            self.git_manager.delete_tag(self._release_state['project_path'], tag_name)
+
         self._cleanup_release_process()
 
     def _cleanup_all_connections(self):
