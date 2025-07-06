@@ -128,11 +128,20 @@ class GitWorker(QObject):
                 origin.push(refspec=f'{active_branch}:{active_branch}')
                 self.operation_success.emit("Push successful", {})
         except GitCommandError as e:
-            err_str = str(e).lower()
-            if "authentication failed" in err_str:
-                msg = "Authentication failed."
+            stderr = str(e.stderr).lower()
+            if "authentication failed" in stderr:
+                msg = ("Authentication failed. Please ensure you have configured a "
+                       "Git Credential Manager or are using SSH for your remote URL. "
+                       "Using passwords over HTTPS is not supported by GitHub.")
+            elif "could not read from remote repository" in stderr:
+                msg = ("Could not read from remote repository. Please ensure the URL "
+                       "is correct and you have permission to access it.")
+            elif "src refspec" in stderr and "does not match any" in stderr:
+                msg = ("The local branch does not exist or does not match a remote "
+                       "branch. You may need to publish the branch first.")
             else:
-                msg = f"Git Push failed: {e}"
+                # Provide a more generic but still informative message
+                msg = f"Git Push failed. Stderr: {e.stderr.strip()}"
             self.error_occurred.emit(msg)
 
     def pull(self, repo_path: str):
