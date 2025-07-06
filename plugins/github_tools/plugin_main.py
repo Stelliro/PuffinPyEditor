@@ -117,9 +117,8 @@ class GitHubToolsPlugin:
         if not project_path:
             self.api.show_message("info", "No Project", "Please open a project to create a release.")
             return
-
         self._prepare_repository_for_release(project_path)
-            
+
     def _prepare_repository_for_release(self, path: str):
         self.api.show_status_message("Verifying repository state...")
         
@@ -189,17 +188,16 @@ class GitHubToolsPlugin:
         behind_commits = list(repo.iter_commits(f'{active_branch.name}..{tracking_branch.name}'))
 
         if behind_commits:
-            # FIX: Give the user control over how to handle divergence.
             msg_box = QMessageBox(self.main_window)
             msg_box.setIcon(QMessageBox.Icon.Question)
             msg_box.setWindowTitle("Branch Not Synchronized")
             
-            if ahead_commits: # Diverged State
+            if ahead_commits:
                 msg_box.setText("Your local branch has diverged from the remote (both have new changes).")
                 msg_box.setInformativeText("To create a clean release, it's recommended to merge the remote changes into your local branch first. How would you like to proceed?")
                 proceed_button = msg_box.addButton("Proceed Anyway (Advanced)", QMessageBox.ButtonRole.ActionRole)
                 proceed_button.setToolTip("Create the release using only your local commits. This is for advanced users who intend to force-push later.")
-            else: # Simply Behind
+            else:
                 msg_box.setText("Your local branch is behind the remote repository.")
                 msg_box.setInformativeText("You are missing changes that exist on the remote. It is strongly recommended to pull these changes before creating a release.")
             
@@ -210,10 +208,10 @@ class GitHubToolsPlugin:
 
             if msg_box.clickedButton() == pull_button:
                 self._trigger_background_pull(repo.working_dir)
-                return False, True, "" # A fix was attempted, wait for it.
+                return False, True, ""
             elif ahead_commits and msg_box.clickedButton() == proceed_button:
                 self.api.log_warning("User chose to proceed with release despite diverged branch.")
-                return True, False, "" # User override
+                return True, False, ""
             else:
                 return False, False, "Synchronization was cancelled by user."
         
@@ -238,7 +236,9 @@ class GitHubToolsPlugin:
             self.api.get_main_window().explorer_panel.refresh()
             self._prepare_repository_for_release(repo_path)
         else:
-            self.api.show_message("critical", "Pull Failed", f"Could not synchronize with remote.\n\nError: {message}")
+            # FIX: Display the actual stderr message from Git, not a generic one.
+            # The 'message' variable from git_error signal contains the detailed reason.
+            self.api.show_message("critical", "Pull Failed", f"Could not synchronize with remote.\n\n<b>Reason:</b>\n{message}")
 
     def _start_release_process(self, project_path: str):
         if not self.ensure_git_identity(project_path): return
