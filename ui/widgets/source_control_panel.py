@@ -3,7 +3,7 @@ import os
 from typing import List, Dict, Optional
 from git import Repo, InvalidGitRepositoryError, Actor
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTreeWidget,
-                             QTreeWidgetItem, QMenu, QMessageBox, QLabel, QHeaderView, QLineEdit)
+                             QTreeWidgetItem, QMenu, QMessageBox, QLabel, QHeaderView, QLineEdit, QComboBox)
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 import qtawesome as qta
@@ -12,6 +12,7 @@ from app_core.project_manager import ProjectManager
 from app_core.source_control_manager import SourceControlManager
 from app_core.github_manager import GitHubManager
 from app_core.puffin_api import PuffinPluginAPI
+from app_core.settings_manager import settings_manager
 
 
 class ProjectSourceControlPanel(QWidget):
@@ -66,8 +67,13 @@ class ProjectSourceControlPanel(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         layout.addWidget(self.project_tree)
 
-        self.commit_message_edit = QLineEdit()
-        self.commit_message_edit.setPlaceholderText("Commit message...")
+        # FIX: Replace QLineEdit with an editable QComboBox for history
+        self.commit_message_edit = QComboBox()
+        self.commit_message_edit.setEditable(True)
+        self.commit_message_edit.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.commit_message_edit.setToolTip("Enter a commit message or select a previous one.")
+        self.commit_message_edit.lineEdit().setPlaceholderText("Commit message...")
+
         self.commit_button = QPushButton("Commit All")
         commit_layout = QHBoxLayout()
         commit_layout.addWidget(self.commit_message_edit)
@@ -109,6 +115,18 @@ class ProjectSourceControlPanel(QWidget):
         self.cleanup_tags_button.setIcon(qta.icon('mdi.tag-remove-outline'))
         self.commit_button.setIcon(qta.icon('mdi.check'))
 
+    def showEvent(self, event):
+        """Override to populate history when the panel becomes visible."""
+        super().showEvent(event)
+        self._populate_commit_history()
+
+    def _populate_commit_history(self):
+        """Loads commit messages from settings and populates the combo box."""
+        history = settings_manager.get("commit_message_history", [])
+        self.commit_message_edit.clear()
+        self.commit_message_edit.addItems(history)
+        self.commit_message_edit.setCurrentText("") # Start with an empty editable field
+
     def _get_selected_project_path(self) -> Optional[str]:
         item = self.project_tree.currentItem()
         if not item:
@@ -134,7 +152,8 @@ class ProjectSourceControlPanel(QWidget):
 
     def _on_commit_clicked(self):
         path = self._get_selected_project_path()
-        message = self.commit_message_edit.text().strip()
+        # FIX: Get text from the QComboBox's currentText method
+        message = self.commit_message_edit.currentText().strip()
         if not path or not message:
             QMessageBox.warning(self, "Commit Failed", "A project must be selected "
                                 "and a commit message must be provided.")
@@ -142,9 +161,8 @@ class ProjectSourceControlPanel(QWidget):
 
         gh_tools = self.api.get_plugin_instance("github_tools")
         if not gh_tools or not gh_tools.ensure_git_identity(path):
-            return  # The ensure_git_identity method will show its own error message.
+            return
 
-        # Now that we know the identity is correct, we can get the Actor and commit.
         try:
             repo = Repo(path)
             with repo.config_reader() as cr:
@@ -159,7 +177,6 @@ class ProjectSourceControlPanel(QWidget):
         self.git_manager.commit_files(path, message, author)
 
     def _on_cleanup_tags_clicked(self):
-        """Handles the logic when the 'Cleanup Tags' button is clicked."""
         path = self._get_selected_project_path()
         if not path:
             QMessageBox.warning(self, "No Project Selected", "Please select a Git project.")
@@ -209,9 +226,20 @@ class ProjectSourceControlPanel(QWidget):
              QMessageBox.information(self, "Cleanup Complete", message)
 
         self.set_ui_locked(False, f"Success: {message}")
-        self.refresh_all_projects()
+        
+        # FIX: Add commit message to history on successful commit
         if "committed" in message.lower() and not data.get('no_changes'):
-            self.commit_message_edit.clear()
+            commit_message = self.commit_message_edit.currentText().strip()
+            history = settings_manager.get("commit_message_history", [])
+            if commit_message in history:
+                history.remove(commit_message)
+            history.insert(0, commit_message)
+            max_history = settings_manager.get("max_commit_history", 50)
+            settings_manager.set("commit_message_history", history[:max_history])
+            self._populate_commit_history()
+        
+        self.refresh_all_projects()
+
 
     def _handle_git_error(self, error_message: str):
         self.set_ui_locked(False, f"Error: {error_message}")

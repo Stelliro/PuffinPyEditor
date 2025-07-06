@@ -191,6 +191,8 @@ class GitHubToolsPlugin:
             msg_box = QMessageBox(self.main_window)
             msg_box.setIcon(QMessageBox.Icon.Question)
             msg_box.setWindowTitle("Branch Not Synchronized")
+            # FIX: Set a minimum width to prevent button text truncation
+            msg_box.setMinimumWidth(400)
             
             if ahead_commits:
                 msg_box.setText("Your local branch has diverged from the remote (both have new changes).")
@@ -206,10 +208,11 @@ class GitHubToolsPlugin:
             msg_box.setDefaultButton(pull_button)
             msg_box.exec()
 
-            if msg_box.clickedButton() == pull_button:
+            clicked_btn = msg_box.clickedButton()
+            if clicked_btn == pull_button:
                 self._trigger_background_pull(repo.working_dir)
                 return False, True, ""
-            elif ahead_commits and msg_box.clickedButton() == proceed_button:
+            elif ahead_commits and clicked_btn == proceed_button:
                 self.api.log_warning("User chose to proceed with release despite diverged branch.")
                 return True, False, ""
             else:
@@ -236,9 +239,14 @@ class GitHubToolsPlugin:
             self.api.get_main_window().explorer_panel.refresh()
             self._prepare_repository_for_release(repo_path)
         else:
-            # FIX: Display the actual stderr message from Git, not a generic one.
-            # The 'message' variable from git_error signal contains the detailed reason.
-            self.api.show_message("critical", "Pull Failed", f"Could not synchronize with remote.\n\n<b>Reason:</b>\n{message}")
+            # FIX: Create a QMessageBox that can render HTML to show the reason cleanly.
+            msg_box = QMessageBox(self.main_window)
+            msg_box.setIcon(QMessageBox.Icon.Critical)
+            msg_box.setWindowTitle("Pull Failed")
+            msg_box.setText("Could not synchronize with the remote repository.")
+            # The 'message' from git_error contains the specific reason.
+            msg_box.setInformativeText(f"<b>Reason:</b><br><pre>{message}</pre>")
+            msg_box.exec()
 
     def _start_release_process(self, project_path: str):
         if not self.ensure_git_identity(project_path): return
@@ -325,12 +333,10 @@ class GitHubToolsPlugin:
             self._upload_next_asset()
 
     def _run_build_script(self):
-        # This is a placeholder for the actual build script execution
         self._log_to_dialog("Simulating build process...", is_warning=True)
         self._advance_release_state("UPLOAD_ASSETS")
 
     def _upload_assets(self):
-        # This is a placeholder for asset gathering and uploading
         self._log_to_dialog("Simulating asset upload...", is_warning=True)
         self._cleanup_release_process(success=True)
 

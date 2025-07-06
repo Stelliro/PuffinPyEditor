@@ -30,12 +30,12 @@ DEFAULT_SETTINGS = {
     "auto_save_delay_seconds": 3,
     "max_recent_files": 15,
     "favorites": [],
-    "open_files": [], # MODIFIED: New setting to remember open files
+    "open_files": [],
 
     # --- Project State ---
     "open_projects": [],
     "active_project_path": None,
-    "explorer_expanded_paths": [], # MODIFIED: New setting to remember expanded folders
+    "explorer_expanded_paths": [],
 
     # --- Integrations & Run ---
     "python_interpreter_path": "",
@@ -44,6 +44,8 @@ DEFAULT_SETTINGS = {
     "source_control_repos": [],
     "active_update_repo_id": None,
     "plugins_distro_repo": "Stelliro/puffin-plugins",
+    "commit_message_history": [],  # NEW: For storing commit history
+    "max_commit_history": 50,      # NEW: To limit the history size
     "ai_export_loadouts": {},
     "ai_export_golden_rules": {
         "Default Golden Rules": [
@@ -78,7 +80,6 @@ class SettingsManager:
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
 
-                # Migration for old setting name
                 if "github_pat" in loaded_settings:
                     if "github_access_token" not in loaded_settings:
                         loaded_settings["github_access_token"] = \
@@ -87,7 +88,6 @@ class SettingsManager:
                         del loaded_settings["github_pat"]
                     log.info("Migrated old 'github_pat' setting.")
 
-                # Merge loaded settings with defaults to ensure all keys exist
                 settings = DEFAULT_SETTINGS.copy()
                 settings.update(loaded_settings)
                 return settings
@@ -106,39 +106,19 @@ class SettingsManager:
     def _save_settings(self, settings_data: Dict[str, Any]):
         """Saves the provided settings data to the JSON file atomically."""
         try:
-            # Ensure the directory exists before writing
             os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)
             temp_file = self.settings_file + ".tmp"
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(settings_data, f, indent=4)
-            # Atomic move/rename
             os.replace(temp_file, self.settings_file)
         except IOError as e:
             log.error(f"Error saving settings to {self.settings_file}: {e}",
                       exc_info=True)
 
     def get(self, key: str, default: Any = None) -> Any:
-        """
-        Gets a setting value by key.
-
-        Args:
-            key: The key of the setting to retrieve.
-            default: The value to return if the key is not found.
-
-        Returns:
-            The setting value.
-        """
         return self.settings.get(key, DEFAULT_SETTINGS.get(key, default))
 
     def set(self, key: str, value: Any, save_immediately: bool = True):
-        """
-
-        Sets a setting value by key.
-        Args:
-            key: The key of the setting to set.
-            value: The new value for the setting.
-            save_immediately: If True, saves all settings to disk immediately.
-        """
         self.settings[key] = value
         if save_immediately:
             self.save()
@@ -148,5 +128,4 @@ class SettingsManager:
         self._save_settings(self.settings)
 
 
-# Singleton instance to be used across the application
 settings_manager = SettingsManager()
