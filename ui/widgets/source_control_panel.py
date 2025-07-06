@@ -4,7 +4,7 @@ from typing import List, Dict, Optional
 from git import Repo, InvalidGitRepositoryError, Actor
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTreeWidget,
                              QTreeWidgetItem, QMenu, QMessageBox, QLabel, QHeaderView, QLineEdit, QComboBox,
-                             QSizePolicy) # <-- FIX: Added QSizePolicy
+                             QSizePolicy)  # <-- FIX: Added QSizePolicy
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 import qtawesome as qta
@@ -51,7 +51,7 @@ class ProjectSourceControlPanel(QWidget):
         self.new_release_button = QPushButton("New Release...")
         self.cleanup_tags_button = QPushButton("Cleanup Tags")
         self.cleanup_tags_button.setToolTip("Delete remote tags that are not part of a release.")
-        
+
         toolbar_layout.addWidget(self.refresh_all_button)
         toolbar_layout.addWidget(self.pull_button)
         toolbar_layout.addWidget(self.push_button)
@@ -68,6 +68,7 @@ class ProjectSourceControlPanel(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         layout.addWidget(self.project_tree)
 
+        # FIX: Replace QLineEdit with an editable QComboBox for history
         self.commit_message_edit = QComboBox()
         self.commit_message_edit.setEditable(True)
         self.commit_message_edit.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -75,7 +76,6 @@ class ProjectSourceControlPanel(QWidget):
         self.commit_message_edit.lineEdit().setPlaceholderText("Commit message...")
         # Make the combobox expand to fill space
         self.commit_message_edit.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
 
         self.commit_button = QPushButton("Commit All")
         commit_layout = QHBoxLayout()
@@ -95,7 +95,7 @@ class ProjectSourceControlPanel(QWidget):
         self.git_manager.git_success.connect(self._handle_git_success)
         self.github_manager.operation_success.connect(self._handle_git_success)
         self.github_manager.operation_failed.connect(self._handle_git_error)
-        
+
         self.refresh_all_button.clicked.connect(self.refresh_all_projects)
         self.push_button.clicked.connect(self._on_push_clicked)
         self.pull_button.clicked.connect(self._on_pull_clicked)
@@ -128,7 +128,7 @@ class ProjectSourceControlPanel(QWidget):
         history = settings_manager.get("commit_message_history", [])
         self.commit_message_edit.clear()
         self.commit_message_edit.addItems(history)
-        self.commit_message_edit.setCurrentText("") # Start with an empty editable field
+        self.commit_message_edit.setCurrentText("")  # Start with an empty editable field
 
     def _get_selected_project_path(self) -> Optional[str]:
         item = self.project_tree.currentItem()
@@ -160,12 +160,13 @@ class ProjectSourceControlPanel(QWidget):
 
         # Simple validation for a common user error
         if message.lower().startswith("git commit"):
-             QMessageBox.warning(self, "Invalid Message", "Please enter only the commit message, not the full 'git commit' command.")
-             return
+            QMessageBox.warning(self, "Invalid Message",
+                                "Please enter only the commit message, not the full 'git commit' command.")
+            return
 
         if not path or not message:
             QMessageBox.warning(self, "Commit Failed", "A project must be selected "
-                                "and a commit message must be provided.")
+                                                       "and a commit message must be provided.")
             return
 
         gh_tools = self.api.get_plugin_instance("github_tools")
@@ -204,7 +205,7 @@ class ProjectSourceControlPanel(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Git Error", f"Could not analyze repository: {e}")
             return
-            
+
         reply = QMessageBox.question(
             self,
             "Confirm Tag Cleanup",
@@ -218,11 +219,11 @@ class ProjectSourceControlPanel(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             self.set_ui_locked(True, f"Cleaning up tags for {owner}/{repo_name}...")
             self.github_manager.cleanup_orphaned_tags(owner, repo_name)
-    
+
     def _on_fix_branch_mismatch_clicked(self, path: str):
         reply = QMessageBox.warning(
             self, "Confirm Branch Fix", "This will perform a force-push and delete "
-            "the 'master' branch from the remote. Are you sure?",
+                                        "the 'master' branch from the remote. Are you sure?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel
         )
@@ -232,10 +233,10 @@ class ProjectSourceControlPanel(QWidget):
 
     def _handle_git_success(self, message: str, data: dict):
         if data.get("deleted_tags") is not None:
-             QMessageBox.information(self, "Cleanup Complete", message)
+            QMessageBox.information(self, "Cleanup Complete", message)
 
         self.set_ui_locked(False, f"Success: {message}")
-        
+
         # Add commit message to history on successful commit
         if "committed" in message.lower() and not data.get('no_changes'):
             commit_message = self.commit_message_edit.currentText().strip()
@@ -246,9 +247,8 @@ class ProjectSourceControlPanel(QWidget):
             max_history = settings_manager.get("max_commit_history", 50)
             settings_manager.set("commit_message_history", history[:max_history])
             self._populate_commit_history()
-        
-        self.refresh_all_projects()
 
+        self.refresh_all_projects()
 
     def _handle_git_error(self, error_message: str):
         self.set_ui_locked(False, "Operation Failed.")
