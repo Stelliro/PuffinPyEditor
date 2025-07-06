@@ -5,21 +5,20 @@ import zipfile
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
-# NEW: Import QObject and pyqtSignal for signals
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from .settings_manager import settings_manager
 from utils.logger import log
+from utils.helpers import clean_git_conflict_markers # Import the moved function
 
 
-class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
+class ProjectManager(QObject):
     """Manages the state of open projects and project-wide operations."""
 
-    # NEW: Add the required signal
     projects_changed = pyqtSignal()
 
     def __init__(self):
-        super().__init__()  # NEW: Call the QObject constructor
+        super().__init__()
         self._open_projects: List[str] = []
         self._active_project_path: Optional[str] = None
         self._load_session()
@@ -68,7 +67,7 @@ class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
         if norm_path not in self._open_projects:
             self._open_projects.append(norm_path)
             log.info(f"Project opened: {norm_path}")
-            self.projects_changed.emit()  # NEW: Emit signal on change
+            self.projects_changed.emit()
         self.set_active_project(norm_path)
         return True
 
@@ -86,7 +85,7 @@ class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
             
             # Persist the change
             self.save_session()
-            self.projects_changed.emit()  # NEW: Emit signal on change
+            self.projects_changed.emit()
 
 
     def get_open_projects(self) -> List[str]:
@@ -99,7 +98,6 @@ class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
         if self._active_project_path != norm_path:
             self._active_project_path = norm_path
             log.info(f"Active project set to: {norm_path}")
-            # Emit signal to let UI components like completion manager know
             self.projects_changed.emit()
 
     def get_active_project_path(self) -> Optional[str]:
@@ -125,14 +123,12 @@ class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
         ignore_dirs = {
             '__pycache__', '.git', 'venv', '.venv', 'dist', 'build', 'logs'
         }
-        # Explicitly ignore the user settings file for security
         ignore_files = {'.gitignore', 'puffin_editor_settings.json'}
 
         try:
             with zipfile.ZipFile(
                     output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for root, dirs, files in os.walk(project_root):
-                    # Modify dirs in-place to prevent walking into ignored dirs
                     dirs[:] = [d for d in dirs if d not in ignore_dirs]
                     for file in files:
                         if file in ignore_files:
@@ -164,7 +160,6 @@ class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
 
         def build_tree_lines(d: dict, prefix: str = "") -> List[str]:
             lines = []
-            # Sort entries so directories (which have children) come first
             entries = sorted(
                 d.keys(), key=lambda k: (not bool(d[k]), k.lower())
             )
@@ -172,45 +167,12 @@ class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
                 is_last = (i == len(entries) - 1)
                 connector = "└── " if is_last else "├── "
                 lines.append(f"{prefix}{connector}{name}")
-                if d[name]:  # It's a directory with children
+                if d[name]:
                     new_prefix = prefix + ("    " if is_last else "│   ")
                     lines.extend(build_tree_lines(d[name], new_prefix))
             return lines
 
         return build_tree_lines(tree)
-
-    def _clean_git_conflict_markers(self, content: str) -> str:
-        """Removes Git conflict markers from a string, keeping the HEAD version."""
-        if '<<<<<<<' not in content:
-            return content
-
-        lines = content.splitlines()
-        cleaned_lines = []
-        in_conflict = False
-        # We want to keep the HEAD version, which is the part before '======='
-        keep_current_version = False
-
-        for line in lines:
-            if line.startswith('<<<<<<<'):
-                in_conflict = True
-                keep_current_version = True
-                continue
-
-            if line.startswith('======='):
-                if in_conflict:
-                    keep_current_version = False
-                    continue
-
-            if line.startswith('>>>>>>>'):
-                if in_conflict:
-                    in_conflict = False
-                    keep_current_version = False
-                    continue
-
-            if not in_conflict or (in_conflict and keep_current_version):
-                cleaned_lines.append(line)
-
-        return "\n".join(cleaned_lines)
 
     def export_project_for_ai(
             self,
@@ -283,7 +245,8 @@ class ProjectManager(QObject):  # MODIFIED: Inherit from QObject
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     original_content = f.read()
-                    cleaned_content = self._clean_git_conflict_markers(original_content)
+                    # Use the refactored utility function
+                    cleaned_content = clean_git_conflict_markers(original_content)
                     if original_content != cleaned_content:
                         log.info(f"Cleaned git conflict markers from {filepath} for export.")
                     output_lines.append(cleaned_content)

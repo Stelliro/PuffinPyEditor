@@ -10,6 +10,7 @@ from PyQt6.QtGui import QGuiApplication, QDesktopServices
 from PyQt6.QtCore import QUrl, pyqtSignal, QObject
 from .settings_manager import settings_manager
 from utils.logger import log
+from utils.helpers import clean_git_conflict_markers # Import the new utility
 
 
 class FileHandler(QObject):
@@ -33,8 +34,14 @@ class FileHandler(QObject):
         if not filepath: return None, None, None
         settings_manager.set("last_opened_directory", os.path.dirname(filepath))
         try:
-            with open(filepath, 'r', encoding='utf-8') as f: content = f.read()
-            self._add_to_recent_files(filepath); return filepath, content, None
+            with open(filepath, 'r', encoding='utf-8') as f:
+                original_content = f.read()
+            # FIX: Automatically clean git conflict markers when opening a file.
+            content = clean_git_conflict_markers(original_content)
+            if content != original_content:
+                log.info(f"Cleaned git conflict markers from {filepath} on load.")
+            self._add_to_recent_files(filepath)
+            return filepath, content, None
         except (IOError, OSError, UnicodeDecodeError) as e:
             msg = (f"Error opening file '{os.path.basename(filepath)}'.\n\nReason: {e}")
             log.error(msg, exc_info=True); return None, None, msg
@@ -49,8 +56,6 @@ class FileHandler(QObject):
             filepath = path_from_dialog; settings_manager.set("last_saved_directory", os.path.dirname(filepath))
         try:
             with open(filepath, 'w', encoding='utf-8') as f: f.write(content)
-            # MODIFIED: Removed the direct call. Let the signal handle it.
-            # self._add_to_recent_files(filepath) is called within the _action_save_file of main_window
             return filepath
         except (IOError, OSError) as e:
             msg = f"Error saving file '{filepath}': {e}"; log.error(msg, exc_info=True)

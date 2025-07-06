@@ -25,6 +25,41 @@ def get_base_path():
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+# NEW: Moved from ProjectManager to be a reusable utility function.
+def clean_git_conflict_markers(content: str) -> str:
+    """Removes Git conflict markers from a string, keeping the HEAD version."""
+    if '<<<<<<<' not in content:
+        return content
+
+    lines = content.splitlines()
+    cleaned_lines = []
+    in_conflict = False
+    # We want to keep the HEAD version, which is the part before '======='
+    keep_current_version = False
+
+    for line in lines:
+        if line.startswith('<<<<<<<'):
+            in_conflict = True
+            keep_current_version = True
+            continue
+
+        if line.startswith('======='):
+            if in_conflict:
+                keep_current_version = False
+                continue
+
+        if line.startswith('>>>>>>>'):
+            if in_conflict:
+                in_conflict = False
+                keep_current_version = False
+                continue
+
+        if not in_conflict or (in_conflict and keep_current_version):
+            cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines)
+
+
 def get_startup_shortcut_path() -> Optional[str]:
     """
     Gets the cross-platform path to the user's startup folder.
