@@ -117,8 +117,9 @@ class GitHubToolsPlugin:
         if not project_path:
             self.api.show_message("info", "No Project", "Please open a project to create a release.")
             return
-        self._prepare_repository_for_release(project_path)
 
+        self._prepare_repository_for_release(project_path)
+            
     def _prepare_repository_for_release(self, path: str):
         self.api.show_status_message("Verifying repository state...")
         
@@ -187,25 +188,39 @@ class GitHubToolsPlugin:
         ahead_commits = list(repo.iter_commits(f'{tracking_branch.name}..{active_branch.name}'))
         behind_commits = list(repo.iter_commits(f'{active_branch.name}..{tracking_branch.name}'))
 
-        # FIX: Handle diverged state by offering to pull, just like the 'behind' state.
         if behind_commits:
-            message_text = "Your local branch is behind the remote."
-            if ahead_commits:
-                message_text = "Your local branch has diverged from the remote (both have new changes)."
+            # FIX: Give the user control over how to handle divergence.
+            msg_box = QMessageBox(self.main_window)
+            msg_box.setIcon(QMessageBox.Icon.Question)
+            msg_box.setWindowTitle("Branch Not Synchronized")
             
-            reply = QMessageBox.question(self.main_window, "Branch Not Synchronized",
-                                         f"{message_text}\n\nTo continue, you must pull the remote changes. This may create a merge commit.\n\nPull changes now?",
-                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.Yes:
+            if ahead_commits: # Diverged State
+                msg_box.setText("Your local branch has diverged from the remote (both have new changes).")
+                msg_box.setInformativeText("To create a clean release, it's recommended to merge the remote changes into your local branch first. How would you like to proceed?")
+                proceed_button = msg_box.addButton("Proceed Anyway (Advanced)", QMessageBox.ButtonRole.ActionRole)
+                proceed_button.setToolTip("Create the release using only your local commits. This is for advanced users who intend to force-push later.")
+            else: # Simply Behind
+                msg_box.setText("Your local branch is behind the remote repository.")
+                msg_box.setInformativeText("You are missing changes that exist on the remote. It is strongly recommended to pull these changes before creating a release.")
+            
+            pull_button = msg_box.addButton("Pull Changes (Recommended)", QMessageBox.ButtonRole.AcceptRole)
+            cancel_button = msg_box.addButton("Cancel Release", QMessageBox.ButtonRole.RejectRole)
+            msg_box.setDefaultButton(pull_button)
+            msg_box.exec()
+
+            if msg_box.clickedButton() == pull_button:
                 self._trigger_background_pull(repo.working_dir)
-                return False, True, "" # A fix was attempted.
+                return False, True, "" # A fix was attempted, wait for it.
+            elif ahead_commits and msg_box.clickedButton() == proceed_button:
+                self.api.log_warning("User chose to proceed with release despite diverged branch.")
+                return True, False, "" # User override
             else:
                 return False, False, "Synchronization was cancelled by user."
         
         if ahead_commits:
             self.api.log_info(f"Branch '{active_branch.name}' is {len(ahead_commits)} commit(s) ahead, which is expected for a new release.")
         
-        return True, False, "" # Synced or ahead, ready to go.
+        return True, False, ""
 
     def _trigger_background_pull(self, repo_path: str):
         self.api.show_status_message("Pulling remote changes...")

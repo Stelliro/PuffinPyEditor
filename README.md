@@ -1,6 +1,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 # 🐧 PuffinPyEditor
 
 **DEVELOPED WITH AI**
@@ -193,6 +194,8 @@ In short, you are free to share and adapt the material for **non-commercial purp
 >>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
 =======
 >>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
+=======
+>>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
 # PuffinPyEditor Plugin Distribution Repository
 This repository is structured to serve plugins for the PuffinPyEditor.
 - `index.json`: A manifest file listing all available plugins and their download URLs.
@@ -200,6 +203,9 @@ This repository is structured to serve plugins for the PuffinPyEditor.
 To publish a new version of a plugin, use the "Publish Plugin" tool inside PuffinPyEditor.
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
+>>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
+=======
 >>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
 =======
 >>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
