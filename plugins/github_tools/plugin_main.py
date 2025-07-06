@@ -118,42 +118,46 @@ class GitHubToolsPlugin:
             self.api.show_message("info", "No Project", "Please open a project to create a release.")
             return
 
-        is_ready, message = self._prepare_repository_for_release(project_path)
-        if is_ready:
-            self._start_release_process(project_path)
-        elif message:
-            self.api.show_message("info", "Release Cancelled", message)
-
-    def _prepare_repository_for_release(self, path: str) -> tuple[bool, str]:
+        self._prepare_repository_for_release(project_path)
+            
+    def _prepare_repository_for_release(self, path: str):
+        """
+        Runs an iterative pre-flight check. It checks for one issue at a time,
+        offers to fix it, and upon success, calls itself again to re-run all checks.
+        """
         self.api.show_status_message("Verifying repository state...")
         
-        while True:
-            try:
-                repo = git.Repo(path)
-                if repo.is_dirty(untracked_files=True):
-                    return False, "Your repository has uncommitted changes or untracked files. Please commit or stash them before creating a release."
-                if os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD')):
-                    if not self._handle_unresolved_merge(repo):
-                        return False, "Merge conflict resolution was cancelled."
-                    self.api.show_status_message("Re-checking repository state after merge abort...")
-                    continue
-                if not repo.remotes:
-                    return False, "This project has no remote repository configured."
-                
-                is_synced, error = self._check_and_handle_branch_sync(repo)
-                if error:
-                    return False, error
-                if not is_synced:
-                    self.api.show_status_message("Re-checking repository state after pull...")
-                    continue
-                
-                self.api.show_status_message("Repository is clean and ready for release.", 2000)
-                return True, ""
+        try:
+            repo = git.Repo(path)
+            # 1. Check for uncommitted changes (unfixable automatically)
+            if repo.is_dirty(untracked_files=True):
+                self.api.show_message("critical", "Uncommitted Changes", "Your repository has uncommitted changes or untracked files. Please commit or stash them before creating a release.")
+                return
 
-            except git.GitCommandError as e:
-                return False, f"A Git command failed during pre-flight checks:\n\n{e.stderr}"
-            except Exception as e:
-                return False, f"An unexpected error occurred during repository check: {e}"
+            # 2. Check for unresolved merge conflicts
+            if os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD')):
+                if self._handle_unresolved_merge(repo):
+                    self.api.show_status_message("Re-checking repository state after merge abort...")
+                    self._prepare_repository_for_release(path) # Re-run checks
+                return
+
+            # 3. Check for branch divergence
+            is_synced, fix_attempted, error = self._check_and_handle_branch_sync(repo)
+            if error:
+                self.api.show_message("info", "Release Cancelled", error)
+                return
+            if fix_attempted: # A pull was started, let the handler re-trigger this process.
+                return
+            
+            # If all checks pass without needing an async fix, proceed.
+            if is_synced:
+                self.api.show_status_message("Repository is clean and ready for release.", 2000)
+                self._start_release_process(path)
+
+        except git.GitCommandError as e:
+            self.api.show_message("critical", "Git Error", f"A Git command failed during pre-flight checks:\n\n{e.stderr}")
+        except Exception as e:
+            self.api.show_message("critical", "Repository Error", f"Could not check repository status: {e}")
 
     def _handle_unresolved_merge(self, repo: git.Repo) -> bool:
         msg_box = QMessageBox(self.main_window)
@@ -163,7 +167,7 @@ class GitHubToolsPlugin:
         msg_box.setText("Your repository has an unresolved merge conflict.")
         msg_box.setInformativeText("To proceed, the merge must be aborted. This is a safe action that will revert your project to the state before the merge began.")
         abort_button = msg_box.addButton("Abort Merge and Continue", QMessageBox.ButtonRole.AcceptRole)
-        msg_box.addButton("Cancel Release", QMessageBox.ButtonRole.RejectRole)
+        cancel_button = msg_box.addButton("Cancel Release", QMessageBox.ButtonRole.RejectRole)
         msg_box.exec()
 
         if msg_box.clickedButton() == abort_button:
@@ -172,47 +176,65 @@ class GitHubToolsPlugin:
                 return True
             except git.GitCommandError as e:
                 self.api.show_message("critical", "Abort Failed", f"Could not abort merge: {e.stderr}")
-                return False
         return False
 
-    def _check_and_handle_branch_sync(self, repo: git.Repo) -> tuple[bool, str]:
-        self.api.show_status_message("Fetching remote status...")
+    def _check_and_handle_branch_sync(self, repo: git.Repo) -> tuple[bool, bool, str]:
+        """
+        Checks branch sync state. Returns (is_synced, fix_attempted, error_message).
+        """
         try:
+            self.api.show_status_message("Fetching remote status...")
             repo.remotes.origin.fetch()
         except git.GitCommandError as e:
-            return False, f"Could not fetch from remote: {e.stderr}"
+            return False, False, f"Could not fetch from remote: {e.stderr}"
 
         active_branch = repo.active_branch
         tracking_branch = active_branch.tracking_branch()
 
         if not tracking_branch:
-            return False, f"Local branch '{active_branch.name}' is not tracking a remote branch. Please push it to the remote first."
+            return False, False, f"Local branch '{active_branch.name}' is not tracking a remote branch. Please push it to the remote first."
 
-        # FIX: Intelligently check branch relationship
         ahead_commits = list(repo.iter_commits(f'{tracking_branch.name}..{active_branch.name}'))
         behind_commits = list(repo.iter_commits(f'{active_branch.name}..{tracking_branch.name}'))
 
         if behind_commits and ahead_commits:
-            return False, f"Your local branch '{active_branch.name}' has diverged from the remote. Please sync your changes manually (e.g., git pull) before creating a release."
+            return False, False, f"Your local branch '{active_branch.name}' has diverged from the remote. Please sync your changes manually (e.g., git pull) before creating a release."
         elif behind_commits:
             reply = QMessageBox.question(self.main_window, "Branch Behind Remote",
                                          f"Your local branch '{active_branch.name}' is behind the remote repository. Pull changes now to continue?",
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
-                try:
-                    self.api.show_status_message("Pulling remote changes...")
-                    repo.remotes.origin.pull()
-                    self.api.get_main_window().explorer_panel.refresh()
-                    return False, "" # Re-run checks after pull
-                except git.GitCommandError as e:
-                    return False, f"Pull failed. Please resolve manually.\n\nError: {e.stderr}"
+                self._trigger_background_pull(repo.working_dir)
+                return False, True, "" # A fix was attempted.
             else:
-                return False, "Synchronization was cancelled by user."
+                return False, False, "Synchronization was cancelled by user."
         
         if ahead_commits:
             self.api.log_info(f"Branch '{active_branch.name}' is {len(ahead_commits)} commit(s) ahead, which is expected for a new release.")
         
-        return True, ""
+        return True, False, "" # Synced or ahead, ready to go.
+
+    def _trigger_background_pull(self, repo_path: str):
+        """Uses the GitManager to pull changes in the background and re-triggers the preflight check."""
+        self.api.show_status_message("Pulling remote changes...")
+        # Connect one-shot signals to the handler
+        self.git_manager.git_success.connect(lambda msg, data: self._on_preflight_pull_finished(True, msg, repo_path))
+        self.git_manager.git_error.connect(lambda err: self._on_preflight_pull_finished(False, err, repo_path))
+        self.git_manager.pull(repo_path)
+
+    def _on_preflight_pull_finished(self, success: bool, message: str, repo_path: str):
+        """Handles the result of the background pull."""
+        # Disconnect the one-shot signals to avoid multiple triggers
+        try:
+            self.git_manager.git_success.disconnect()
+            self.git_manager.git_error.disconnect()
+        except TypeError: pass
+
+        if success:
+            self.api.get_main_window().explorer_panel.refresh()
+            self._prepare_repository_for_release(repo_path) # Re-run checks
+        else:
+            self.api.show_message("critical", "Pull Failed", f"Could not synchronize with remote.\n\nError: {message}")
 
     def _start_release_process(self, project_path: str):
         if not self.ensure_git_identity(project_path): return
@@ -237,7 +259,7 @@ class GitHubToolsPlugin:
         self._release_state = {'dialog_data': dialog.get_release_data(), 'project_path': project_path,
                                'owner': owner, 'repo_name': repo_name}
         self._advance_release_state("BUMP_VERSION_COMMIT")
-
+        
     def _advance_release_state(self, next_step):
         self._release_state['step'] = next_step
         step_title = next_step.replace('_', ' ').title()
@@ -406,6 +428,11 @@ class GitHubToolsPlugin:
         if self.progress_dialog:
             self.progress_dialog.add_log(f"\n--- RELEASE {'COMPLETE' if success else 'FAILED'} ---")
             self.progress_dialog.show_close_button()
+            self.progress_dialog = None
+        if zip_path := self._release_state.get('temp_zip_path'):
+            if os.path.exists(zip_path):
+                os.remove(zip_path)
+                self.api.log_info(f"Cleaned up temporary zip file: {zip_path}")
         self._release_state = {}
 
     def _publish_repo(self, path):
