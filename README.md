@@ -1,12 +1,3 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 # 🐧 PuffinPyEditor
 
 **DEVELOPED WITH AI**
@@ -194,50 +185,9 @@ Contributions are welcome! Whether it's reporting a bug, suggesting a new featur
 This project is licensed under the **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License**.
 
 In short, you are free to share and adapt the material for **non-commercial purposes**, as long as you give appropriate credit and distribute your contributions under the same license. For the full license text, please see the `LICENSE.md` file.
-=======
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
+
 # PuffinPyEditor Plugin Distribution Repository
 This repository is structured to serve plugins for the PuffinPyEditor.
 - `index.json`: A manifest file listing all available plugins and their download URLs.
 - `zips/`: This directory contains the packaged `.zip` files for each plugin.
 To publish a new version of a plugin, use the "Publish Plugin" tool inside PuffinPyEditor.
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
-=======
->>>>>>> 3a3f3c7791dc5b872454b8fc93e7230d2014e032
