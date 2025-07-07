@@ -87,6 +87,36 @@ class ProjectManager(QObject):
             self.save_session()
             self.projects_changed.emit()
 
+    def move_project(self, path_to_move: str, direction: str):
+        """Moves a project up or down in the list."""
+        norm_path = os.path.normpath(path_to_move)
+        if norm_path not in self._open_projects:
+            return
+
+        idx = self._open_projects.index(norm_path)
+        if direction == 'up' and idx > 0:
+            self._open_projects.insert(idx - 1, self._open_projects.pop(idx))
+            self.save_session()
+            self.projects_changed.emit()
+        elif direction == 'down' and idx < len(self._open_projects) - 1:
+            self._open_projects.insert(idx + 1, self._open_projects.pop(idx))
+            self.save_session()
+            self.projects_changed.emit()
+
+    def move_project_to_end(self, path_to_move: str, to_top: bool):
+        """Moves a project to the top or bottom of the list."""
+        norm_path = os.path.normpath(path_to_move)
+        if norm_path not in self._open_projects:
+            return
+
+        item = self._open_projects.pop(self._open_projects.index(norm_path))
+        if to_top:
+            self._open_projects.insert(0, item)
+        else:
+            self._open_projects.append(item)
+
+        self.save_session()
+        self.projects_changed.emit()
 
     def get_open_projects(self) -> List[str]:
         """Returns the list of currently open project paths."""
@@ -144,7 +174,7 @@ class ProjectManager(QObject):
             log.error(f"Failed to create project zip: {e}", exc_info=True)
             return False
 
-    def _generate_file_tree_from_list(
+    def generate_file_tree_from_list(
             self, project_root: str, file_list: List[str]
     ) -> List[str]:
         """Generates a text-based file tree from a specific list of files."""
@@ -214,7 +244,7 @@ class ProjectManager(QObject):
 
         output_lines.append("\n## 🗂️ File Tree of Included Files:\n```")
         output_lines.append(f"/{project_name}")
-        tree_text_lines = self._generate_file_tree_from_list(project_root, selected_files)
+        tree_text_lines = self.generate_file_tree_from_list(project_root, selected_files)
         output_lines.extend(tree_text_lines)
         output_lines.append("```\n---")
         output_lines.append("\n## 📄 File Contents:\n")

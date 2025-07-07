@@ -2,25 +2,47 @@
 import os
 import re
 from typing import Dict, List, Optional
-
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QWidget, QSplitter,
-    QComboBox, QTextEdit, QPushButton, QStackedWidget,
-    QFileDialog, QMessageBox, QFrame, QLabel, QListWidget,
+    QTextEdit, QPushButton, QMessageBox, QFrame, QLabel, QListWidget,
     QTreeView, QToolButton, QInputDialog, QSpinBox, QCheckBox,
-    QGroupBox, QFormLayout, QLineEdit, QSizePolicy
+    QGroupBox, QFormLayout, QLineEdit, QStackedWidget,
+    QDialogButtonBox, QListWidgetItem,
 )
-from PyQt6.QtGui import QStandardItemModel, QStandardItem
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QFont
 from PyQt6.QtCore import Qt, QTimer
 import qtawesome as qta
-
 from app_core.puffin_api import PuffinPluginAPI
 from app_core.settings_manager import settings_manager
 from .response_parser import parse_llm_response, apply_changes_to_project
 from utils.logger import log
-# FIX: Import the helper function to clean files before adding them to the prompt.
-from utils.helpers import clean_git_conflict_markers
+from utils.helpers import clean_git_conflict_markers, generate_unified_diff
 
+# A simple syntax highlighter for the diff view
+from app_core.highlighters.python_syntax_highlighter import PythonSyntaxHighlighter
+
+class DiffViewer(QTextEdit):
+    """A simple QTextEdit subclass for displaying unified diffs."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setFont(QFont("Consolas", 10))
+        self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+
+    def set_diff_text(self, diff_text: str):
+        # Basic coloring for diffs
+        html = ""
+        for line in diff_text.splitlines():
+            line_html = line.replace("&", "&").replace("<", "<").replace(">", ">")
+            if line.startswith('+'):
+                html += f'<span style="color: #a7c080;">{line_html}</span><br>'
+            elif line.startswith('-'):
+                html += f'<span style="color: #e67e80;">{line_html}</span><br>'
+            elif line.startswith('@@'):
+                html += f'<span style="color: #83c092;">{line_html}</span><br>'
+            else:
+                html += f'<span>{line_html}</span><br>'
+        self.setHtml(f"<pre>{html}</pre>")
 
 class AIPatcherDialog(QDialog):
     """A dialog to generate patch prompts and apply AI-generated code changes."""
@@ -30,280 +52,313 @@ class AIPatcherDialog(QDialog):
         self.api = puffin_api
         self.project_manager = self.api.get_manager("project")
         self.project_root = self.project_manager.get_active_project_path()
-        self.golden_rule_sets: Dict[str, List[str]] = {}
-        self._is_updating_checks = False
+        self.parsed_changes: Dict[str, str] = {}
+        self.is_updating_checks = False
 
         self.setWindowTitle("AI Patcher")
         self.setMinimumSize(950, 700)
-
         self._setup_ui()
         self._connect_signals()
-        self._populate_file_tree()
-        self._load_and_populate_golden_rule_sets()
-        self._on_mode_changed(0) # Set initial mode
+        self._go_to_step(0)
 
     def _setup_ui(self):
         self.main_layout = QVBoxLayout(self)
+        self.stacked_widget = QStackedWidget()
+        self.stacked_widget.addWidget(self._create_step1_setup_page())
+        self.stacked_widget.addWidget(self._create_step2_review_page())
+        self.stacked_widget.addWidget(self._create_step3_complete_page())
+        self.main_layout.addWidget(self.stacked_widget, 1)
+
+        self.button_layout = QHBoxLayout()
+        self.back_button = QPushButton("Back")
+        self.next_button = QPushButton("Next")
+        self.apply_button = QPushButton("Apply Patch")
+        self.close_button = QPushButton("Close")
+        self.copy_button = QPushButton("Copy Prompt")
+
+        self.button_layout.addWidget(self.back_button)
+        self.button_layout.addStretch()
+        self.button_layout.addWidget(self.copy_button)
+        self.button_layout.addWidget(self.next_button)
+        self.button_layout.addWidget(self.apply_button)
+        self.button_layout.addWidget(self.close_button)
+        self.main_layout.addLayout(self.button_layout)
+
+    def _connect_signals(self):
+        self.back_button.clicked.connect(self._go_back)
+        self.next_button.clicked.connect(self._go_next)
+        self.apply_button.clicked.connect(self._apply_patch)
+        self.close_button.clicked.connect(self.reject)
+        self.copy_button.clicked.connect(self._copy_prompt_to_clipboard)
+
+    def _go_to_step(self, index: int):
+        self.stacked_widget.setCurrentIndex(index)
+        self.back_button.setVisible(index > 0)
+        self.next_button.setVisible(index < 2)
+        self.apply_button.setVisible(index == 1)
+        self.copy_button.setVisible(index == 0)
         
-        mode_layout = QHBoxLayout()
-        mode_layout.addWidget(QLabel("Mode:"))
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Generate Patch Prompt", "Apply Patch from AI"])
-        mode_layout.addWidget(self.mode_combo, 1)
-        self.main_layout.addLayout(mode_layout)
+        if index == 0:
+            self.setWindowTitle("AI Patcher - Step 1: Generate Prompt")
+            self._populate_file_tree()
+            self.next_button.setText("Generate & Continue")
+        elif index == 1:
+            self.setWindowTitle("AI Patcher - Step 2: Review and Apply Patch")
+            self.next_button.setText("Finish")
+            if not self.parsed_changes: self._parse_and_load_review()
+        elif index == 2:
+            self.setWindowTitle("AI Patcher - Complete")
+            self._setup_completion_page()
 
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_layout.addWidget(self.splitter, 1)
+    def _go_next(self):
+        current_index = self.stacked_widget.currentIndex()
+        if current_index == 0:
+            self._generate_prompt()
+            self._go_to_step(1)
+        else:
+            self._go_to_step(current_index + 1)
+    
+    def _go_back(self):
+        self._go_to_step(self.stacked_widget.currentIndex() - 1)
+
+    def _create_step1_setup_page(self) -> QWidget:
+        page = QWidget()
+        page_layout = QHBoxLayout(page)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        page_layout.addWidget(splitter)
         
-        self._create_left_pane()
-        self._create_right_pane()
-
-        self.splitter.setSizes([350, 600])
-
-        self.action_button = QPushButton("Generate Prompt")
-        self.copy_button = QPushButton("Copy to Clipboard")
-        self.copy_button.setIcon(qta.icon('fa5s.copy'))
-        
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self.copy_button)
-        button_layout.addWidget(self.action_button)
-        self.main_layout.addLayout(button_layout)
-
-    def _create_left_pane(self):
-        left_pane = QWidget()
+        # Left Pane: File Selection
+        left_pane = QGroupBox("Select Files to Include")
         left_layout = QVBoxLayout(left_pane)
-        self.splitter.addWidget(left_pane)
-
-        files_group = QGroupBox("Select Files to Include")
-        files_layout = QVBoxLayout(files_group)
-        
         file_actions_layout = QHBoxLayout()
-        self.expand_all_button = QToolButton(icon=qta.icon('fa5s.angle-double-down', color='grey'), toolTip="Expand All")
-        self.collapse_all_button = QToolButton(icon=qta.icon('fa5s.angle-double-up', color='grey'), toolTip="Collapse All")
+        self.expand_all_button = QToolButton(icon=qta.icon('fa5s.angle-double-down'), toolTip="Expand All")
+        self.collapse_all_button = QToolButton(icon=qta.icon('fa5s.angle-double-up'), toolTip="Collapse All")
         self.toggle_select_button = QToolButton(autoRaise=True)
-        for button in [self.expand_all_button, self.collapse_all_button]: button.setAutoRaise(True)
         file_actions_layout.addWidget(self.expand_all_button)
         file_actions_layout.addWidget(self.collapse_all_button)
         file_actions_layout.addStretch()
         file_actions_layout.addWidget(self.toggle_select_button)
-        files_layout.addLayout(file_actions_layout)
-
+        left_layout.addLayout(file_actions_layout)
         self.file_tree = QTreeView()
         self.file_tree.setHeaderHidden(True)
         self.file_model = QStandardItemModel()
         self.file_tree.setModel(self.file_model)
-        files_layout.addWidget(self.file_tree)
-        left_layout.addWidget(files_group)
+        left_layout.addWidget(self.file_tree)
+        splitter.addWidget(left_pane)
 
-    def _create_right_pane(self):
+        # Right Pane: Prompt and Context
         right_pane = QWidget()
-        self.right_layout = QVBoxLayout(right_pane)
-        self.splitter.addWidget(right_pane)
+        right_layout = QVBoxLayout(right_pane)
+        self.prompt_edit = QTextEdit()
+        self.prompt_edit.setPlaceholderText("Enter the main goal for the AI, e.g., 'Refactor this class to be more efficient' or 'Fix the bug described in this changelog...'")
+        right_layout.addWidget(QLabel("<b>Main Instructions for AI:</b>"))
+        right_layout.addWidget(self.prompt_edit, 1)
+        splitter.addWidget(right_pane)
 
-        # Main workspace for prompt/response
-        self.main_workspace = QTextEdit()
-        self.main_workspace.setFontFamily("Consolas")
-        self.right_layout.addWidget(self.main_workspace, 2)
+        splitter.setSizes([350, 600])
 
-        # Options panels
-        self.stacked_options = QStackedWidget()
-        self.stacked_options.addWidget(self._create_generate_options())
-        self.stacked_options.addWidget(self._create_apply_options())
-        self.right_layout.addWidget(self.stacked_options, 1)
-
-    def _create_generate_options(self) -> QWidget:
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        
-        context_group = QGroupBox("Context File & Golden Rules")
-        context_layout = QVBoxLayout(context_group)
-        
-        # Context File Selection
-        context_file_layout = QHBoxLayout()
-        context_file_layout.addWidget(QLabel("Context File (e.g., changelog.md):"))
-        self.context_file_path = QLineEdit(readOnly=True, placeholderText="Click 'Browse' to select a file...")
-        browse_button = QPushButton("Browse...")
-        browse_button.clicked.connect(self._browse_for_context_file)
-        context_file_layout.addWidget(self.context_file_path, 1)
-        context_file_layout.addWidget(browse_button)
-        context_layout.addLayout(context_file_layout)
-        
-        # Golden Rules
-        golden_rules_top_layout = QHBoxLayout()
-        self.golden_rules_combo = QComboBox()
-        self.save_golden_rules_button = QPushButton("Save As New...")
-        golden_rules_top_layout.addWidget(self.golden_rules_combo, 1)
-        golden_rules_top_layout.addWidget(self.save_golden_rules_button)
-        context_layout.addLayout(golden_rules_top_layout)
-        self.golden_rules_list = QListWidget(minimumHeight=80)
-        context_layout.addWidget(self.golden_rules_list)
-
-        # AI Response Formatting
-        formatting_group = QGroupBox("AI Response Formatting")
-        form_layout = QFormLayout(formatting_group)
-        self.break_on_lines_check = QCheckBox("Request new message every")
-        self.break_lines_spin = QSpinBox(minimum=500, maximum=8000, value=2000, singleStep=100, suffix=" lines")
-        lines_layout = QHBoxLayout()
-        lines_layout.addWidget(self.break_on_lines_check)
-        lines_layout.addWidget(self.break_lines_spin)
-        
-        self.break_on_files_check = QCheckBox("Request new message every")
-        self.break_files_spin = QSpinBox(minimum=1, maximum=100, value=5, suffix=" files")
-        files_layout = QHBoxLayout()
-        files_layout.addWidget(self.break_on_files_check)
-        files_layout.addWidget(self.break_files_spin)
-
-        form_layout.addRow(lines_layout)
-        form_layout.addRow(files_layout)
-        
-        layout.addWidget(context_group)
-        layout.addWidget(formatting_group)
-        layout.addStretch()
-        return container
-
-    def _create_apply_options(self) -> QWidget:
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        paste_button = QPushButton("Paste from Clipboard")
-        paste_button.setIcon(qta.icon('fa5s.paste'))
-        paste_button.clicked.connect(lambda: self.main_workspace.paste())
-        layout.addWidget(paste_button)
-        layout.addStretch()
-        return widget
-
-    def _connect_signals(self):
-        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        self.action_button.clicked.connect(self._on_action_button_clicked)
-        self.copy_button.clicked.connect(lambda: self.main_workspace.selectAll() and self.main_workspace.copy())
-        
-        # File Tree Signals
-        self.file_model.itemChanged.connect(self._on_item_changed)
         self.expand_all_button.clicked.connect(self.file_tree.expandAll)
         self.collapse_all_button.clicked.connect(self.file_tree.collapseAll)
+        self.file_model.itemChanged.connect(self._on_item_changed)
         self.toggle_select_button.clicked.connect(self._on_toggle_select_clicked)
+        return page
 
-        # Golden Rules Signals
-        self.golden_rules_combo.currentIndexChanged.connect(self._on_golden_rule_set_selected)
-        self.save_golden_rules_button.clicked.connect(self._save_golden_rule_set)
+    def _create_step2_review_page(self) -> QWidget:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        self.response_edit = QTextEdit()
+        self.response_edit.setPlaceholderText("Paste the full markdown response from the AI here, then click 'Load Patch' to see the changes.")
+        self.response_edit.setFontFamily("Consolas")
+        load_button = QPushButton("Load Patch from Text")
+        load_button.clicked.connect(self._parse_and_load_review)
+        
+        page_layout.addWidget(QLabel("<b>AI Response:</b>"))
+        page_layout.addWidget(self.response_edit, 1)
+        page_layout.addWidget(load_button, 0, Qt.AlignmentFlag.AlignRight)
 
-    def _on_mode_changed(self, index: int):
-        self.main_workspace.clear()
-        self.copy_button.hide()
-        self.stacked_options.setCurrentIndex(index)
-        if index == 0: # Generate mode
-            self.action_button.setText("Generate Prompt")
-            self.main_workspace.setReadOnly(True)
-            self.main_workspace.setPlaceholderText("Configure options and click 'Generate Prompt'...")
-        else: # Apply mode
-            self.action_button.setText("Preview & Apply Patch")
-            self.main_workspace.setReadOnly(False)
-            self.main_workspace.setPlaceholderText("Paste the full markdown response from the AI here.")
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # Changed files list
+        changes_group = QGroupBox("Detected Changes")
+        changes_layout = QVBoxLayout(changes_group)
+        self.changes_list = QListWidget()
+        self.changes_list.itemChanged.connect(self._on_change_item_checked)
+        self.changes_list.currentItemChanged.connect(self._display_diff)
+        changes_layout.addWidget(self.changes_list)
+        splitter.addWidget(changes_group)
+        
+        # Diff viewer
+        diff_group = QGroupBox("Diff Preview")
+        diff_layout = QVBoxLayout(diff_group)
+        self.diff_viewer = DiffViewer()
+        diff_layout.addWidget(self.diff_viewer)
+        splitter.addWidget(diff_group)
+        
+        splitter.setSizes([300, 650])
+        page_layout.addWidget(splitter, 2)
+        return page
 
-    def _on_action_button_clicked(self):
-        if self.mode_combo.currentIndex() == 0: self._generate_prompt()
-        else: self._apply_patch()
+    def _create_step3_complete_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.completion_label = QLabel()
+        self.completion_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = QFont(); font.setPointSize(14)
+        self.completion_label.setFont(font)
+        
+        actions_group = QGroupBox("Next Steps")
+        actions_layout = QHBoxLayout(actions_group)
+        self.linter_button = QPushButton(qta.icon('mdi.bug-check-outline'), "Run Linter on Changed Files")
+        self.source_control_button = QPushButton(qta.icon('mdi.git'), "Open Source Control")
+        
+        actions_layout.addWidget(self.linter_button)
+        actions_layout.addWidget(self.source_control_button)
 
-    def _browse_for_context_file(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Select Context File", self.project_root, "All Files (*)")
-        if filepath: self.context_file_path.setText(filepath)
+        layout.addStretch(1)
+        layout.addWidget(self.completion_label)
+        layout.addWidget(actions_group)
+        layout.addStretch(2)
+
+        self.linter_button.clicked.connect(self._run_linter)
+        self.source_control_button.clicked.connect(self._open_source_control)
+        return page
+
+    def _setup_completion_page(self):
+        applied_files = [self.changes_list.item(i).data(Qt.ItemDataRole.UserRole)['path'] for i in range(self.changes_list.count()) if self.changes_list.item(i).checkState() == Qt.CheckState.Checked]
+        count = len(applied_files)
+        self.completion_label.setText(f"Successfully applied changes to {count} file(s).")
+        self.linter_button.setEnabled(count > 0)
+
+    def _run_linter(self):
+        linter = self.api.get_manager("linter")
+        linter.lint_project(self.project_root)
+        self.api.show_status_message("Project-wide linting started...", 3000)
+        self.accept()
+
+    def _open_source_control(self):
+        if sc_panel := self.api.get_main_window().source_control_panel:
+            if dock := sc_panel.parentWidget():
+                if isinstance(dock.parentWidget(), QStackedWidget): # It's in the bottom tab bar
+                    dock.parentWidget().setCurrentWidget(dock)
+                dock.show()
+                dock.raise_()
+        self.accept()
 
     def _generate_prompt(self):
         selected_files = self._get_checked_files()
         if not selected_files:
-            QMessageBox.warning(self, "No Files Selected", "Please select at least one file to include in the prompt.")
+            QMessageBox.warning(self, "No Files Selected", "Please select at least one file to include.")
             return
 
-        context_file = self.context_file_path.text()
-        context_content = ""
-        if context_file:
-            try:
-                with open(context_file, 'r', encoding='utf-8') as f: context_content = f.read()
-            except IOError as e:
-                QMessageBox.critical(self, "Error Reading File", f"Could not read context file: {e}")
-                return
-        
-        instructions = [
-            "You are an expert developer tasked with updating a codebase. Based on the provided "
-            f"context file (`{os.path.basename(context_file)}`), please update the project source files. "
-            "Your response MUST ONLY contain the complete, updated content for each file that needs to change. "
-            "Enclose each file's content in the standard `### File:` and code block format. "
-            "Do not add any extra commentary, explanations, or summaries outside of the code blocks."
-        ]
-        if self.break_on_lines_check.isChecked():
-            instructions.append(f"IMPORTANT: Please write your response in a new message every {self.break_lines_spin.value()} lines.")
-        if self.break_on_files_check.isChecked():
-            instructions.append(f"IMPORTANT: Please write your response in a new message every {self.break_files_spin.value()} files.")
-
-        guidelines = [f"The primary instructions are in the context file: {os.path.basename(context_file)}"] if context_content else []
-        golden_rules = [self.golden_rules_list.item(i).text() for i in range(self.golden_rules_list.count())]
-
+        instructions = self.prompt_edit.toPlainText().strip()
+        if not instructions:
+            QMessageBox.warning(self, "Instructions Missing", "Please provide instructions for the AI.")
+            return
+            
         project_name = os.path.basename(self.project_root)
-        # FIX: The project_manager method is private; call the underlying helper directly
-        file_tree_text = "\n".join(self.project_manager._generate_file_tree_from_list(self.project_root, selected_files))
+        file_tree_text = "\n".join(self.project_manager.generate_file_tree_from_list(self.project_root, selected_files))
         
         prompt_parts = [
             f"# Project Patch Request: {project_name}", "---",
-            "## AI Instructions", "```text", "\n".join(instructions), "```",
+            "## AI Instructions", "```text", instructions, "```",
+            "## Golden Rules", "```text", 
+            "1. Your response MUST ONLY contain the complete, updated content for each file that needs to change.",
+            "2. Enclose each file's content in the standard `### File: /path/to/file.ext` and code block format.",
+            "3. Do not add any extra commentary, explanations, or summaries outside of the code blocks.",
+            "```", "---",
+            "## Project Files", f"```\n/{project_name}\n{file_tree_text}\n```", "---"
         ]
-        if guidelines: prompt_parts.extend(["## Guidelines", "```text", "\n".join(f"- {g}" for g in guidelines), "```"])
-        if golden_rules: prompt_parts.extend(["## Golden Rules", "```text", "\n".join(f"{i+1}. {g}" for i,g in enumerate(golden_rules)), "```"])
-        if context_content: prompt_parts.extend(["---", f"## Context File: `{os.path.basename(context_file)}`", "```markdown", context_content, "```"])
-        
-        prompt_parts.extend(["---", "## Project Files", f"```\n/{project_name}\n{file_tree_text}\n```"])
         
         for file_path in sorted(selected_files):
             relative_path = os.path.relpath(file_path, self.project_root).replace(os.sep, '/')
             lang = os.path.splitext(file_path)[1].lstrip('.') or 'text'
             prompt_parts.append(f"### File: `/{relative_path}`\n```{lang}")
             try:
-                # FIX: Read and clean the file content before appending it.
                 with open(file_path, 'r', encoding='utf-8') as f:
-                    original_content = f.read()
-                    cleaned_content = clean_git_conflict_markers(original_content)
-                    if original_content != cleaned_content:
-                        log.info(f"Cleaned git conflict markers from {file_path} for patcher prompt.")
-                    prompt_parts.append(cleaned_content)
+                    content = f.read()
+                cleaned_content = clean_git_conflict_markers(content)
+                prompt_parts.append(cleaned_content)
             except Exception as e:
                 prompt_parts.append(f"[Error reading file: {e}]")
             prompt_parts.append("```")
 
-        self.main_workspace.setPlainText("\n".join(prompt_parts))
-        self.copy_button.show()
-        self.api.show_status_message("Prompt generated successfully.", 3000)
+        self.generated_prompt = "\n".join(prompt_parts)
 
-    def _apply_patch(self):
-        response_text = self.main_workspace.toPlainText()
-        if not response_text.strip():
-            QMessageBox.warning(self, "Empty Response", "Please paste the AI's response into the text area.")
+    def _copy_prompt_to_clipboard(self):
+        self._generate_prompt()
+        QApplication.clipboard().setText(self.generated_prompt)
+        self.api.show_status_message("Prompt copied to clipboard!", 3000)
+
+    def _parse_and_load_review(self):
+        self.parsed_changes = parse_llm_response(self.response_edit.toPlainText())
+        self.changes_list.clear()
+        self.diff_viewer.clear()
+
+        if not self.parsed_changes:
+            QMessageBox.information(self, "No Changes Found", "Could not find any valid file blocks in the response text.")
+            return
+        
+        for rel_path, new_content in sorted(self.parsed_changes.items()):
+            item = QListWidgetItem(rel_path.lstrip('/'))
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked)
+            item.setData(Qt.ItemDataRole.UserRole, {'path': rel_path, 'content': new_content})
+            self.changes_list.addItem(item)
+        
+        if self.changes_list.count() > 0:
+            self.changes_list.setCurrentRow(0)
+
+    def _display_diff(self, current: QListWidgetItem, _):
+        if not current:
+            self.diff_viewer.clear()
             return
             
-        changes = parse_llm_response(response_text)
-        if not changes:
-            QMessageBox.information(self, "No Changes Found", "Could not find any valid file blocks to apply.")
+        data = current.data(Qt.ItemDataRole.UserRole)
+        rel_path = data['path']
+        new_content = data['content']
+        abs_path = os.path.join(self.project_root, rel_path.lstrip('/'))
+
+        original_content = ""
+        if os.path.exists(abs_path):
+            try:
+                with open(abs_path, 'r', encoding='utf-8') as f:
+                    original_content = f.read()
+            except IOError as e:
+                self.diff_viewer.setPlainText(f"Error reading original file: {e}")
+                return
+        
+        diff_text = generate_unified_diff(original_content, new_content, fromfile=f"a{rel_path}", tofile=f"b{rel_path}")
+        self.diff_viewer.set_diff_text(diff_text)
+    
+    def _on_change_item_checked(self, item: QListWidgetItem):
+        is_anything_checked = False
+        for i in range(self.changes_list.count()):
+            if self.changes_list.item(i).checkState() == Qt.CheckState.Checked:
+                is_anything_checked = True
+                break
+        self.apply_button.setEnabled(is_anything_checked)
+
+    def _apply_patch(self):
+        changes_to_apply = {}
+        for i in range(self.changes_list.count()):
+            item = self.changes_list.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                changes_to_apply[data['path']] = data['content']
+        
+        if not changes_to_apply:
+            QMessageBox.warning(self, "No Changes Selected", "Please check the files you wish to apply changes to.")
             return
 
-        confirmation_dialog = QDialog(self)
-        confirmation_dialog.setWindowTitle("Confirm Changes")
-        layout = QVBoxLayout(confirmation_dialog)
-        layout.addWidget(QLabel("The following files will be overwritten. Please review:"))
-        list_widget = QListWidget()
-        list_widget.addItems(sorted(changes.keys()))
-        layout.addWidget(list_widget)
-        
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(confirmation_dialog.accept)
-        buttons.rejected.connect(confirmation_dialog.reject)
-        layout.addWidget(buttons)
-        
-        if confirmation_dialog.exec():
-            success, message = apply_changes_to_project(self.project_root, changes)
-            if success:
-                QMessageBox.information(self, "Patch Applied", message)
-                if explorer := self.api.get_main_window().explorer_panel:
-                    explorer.refresh()
-            else:
-                QMessageBox.critical(self, "Patch Failed", message)
+        success, message = apply_changes_to_project(self.project_root, changes_to_apply)
+        if success:
+            QMessageBox.information(self, "Patch Applied", message)
+            if explorer := self.api.get_main_window().explorer_panel:
+                explorer.refresh()
+            self._go_to_step(2)
+        else:
+            QMessageBox.critical(self, "Patch Failed", message)
 
     def _populate_file_tree(self):
         self.file_model.clear()
@@ -315,21 +370,21 @@ class AIPatcherDialog(QDialog):
             parent_node = path_map.get(os.path.normpath(dirpath))
             if parent_node is None: continue
             for dirname in sorted(dirnames):
-                dir_item = QStandardItem(dirname); dir_item.setIcon(qta.icon('fa5.folder', color='grey')); dir_item.setCheckable(True)
+                dir_item = QStandardItem(dirname); dir_item.setIcon(qta.icon('fa5.folder')); dir_item.setCheckable(True)
                 path = os.path.join(dirpath, dirname); dir_item.setData(path, Qt.ItemDataRole.UserRole)
                 parent_node.appendRow(dir_item); path_map[path] = dir_item
             for filename in sorted(filenames):
-                file_item = QStandardItem(filename); file_item.setIcon(qta.icon('fa5.file-alt', color='grey')); file_item.setCheckable(True)
+                file_item = QStandardItem(filename); file_item.setIcon(qta.icon('fa5.file-alt')); file_item.setCheckable(True)
                 path = os.path.join(dirpath, filename); file_item.setData(path, Qt.ItemDataRole.UserRole)
                 parent_node.appendRow(file_item)
         self.file_tree.expandToDepth(0)
-        self._set_all_check_states(Qt.CheckState.Checked)
+        self._set_all_check_states(Qt.CheckState.Unchecked)
 
     def _set_all_check_states(self, state: Qt.CheckState):
-        self._is_updating_checks = True
+        self.is_updating_checks = True
         root = self.file_model.invisibleRootItem()
         for row in range(root.rowCount()): self._recursive_set_check_state(root.child(row), state)
-        self._is_updating_checks = False
+        self.is_updating_checks = False
         self._update_toggle_button_state()
 
     def _recursive_set_check_state(self, item, state):
@@ -342,8 +397,9 @@ class AIPatcherDialog(QDialog):
         else: self._set_all_check_states(Qt.CheckState.Checked)
 
     def _update_toggle_button_state(self):
-        icon_name = 'fa5s.check-square' if self._are_all_items_checked() else 'fa5.square'
-        tooltip = "Deselect all files." if self._are_all_items_checked() else "Select all files."
+        all_checked = self._are_all_items_checked()
+        icon_name = 'fa5s.check-square' if all_checked else 'fa5.square'
+        tooltip = "Deselect all files" if all_checked else "Select all files"
         self.toggle_select_button.setIcon(qta.icon(icon_name, color='grey')); self.toggle_select_button.setToolTip(tooltip)
 
     def _are_all_items_checked(self) -> bool:
@@ -362,12 +418,12 @@ class AIPatcherDialog(QDialog):
         return items
         
     def _on_item_changed(self, item: QStandardItem):
-        if self._is_updating_checks: return
-        self._is_updating_checks = True
+        if self.is_updating_checks: return
+        self.is_updating_checks = True
         state = item.checkState()
         if state != Qt.CheckState.PartiallyChecked: self._update_descendant_states(item, state)
         if item.parent(): self._update_ancestor_states(item.parent())
-        self._is_updating_checks = False
+        self.is_updating_checks = False
         self._update_toggle_button_state()
 
     def _update_descendant_states(self, parent, state):
@@ -394,29 +450,3 @@ class AIPatcherDialog(QDialog):
                     if child := parent.child(r): recurse(child)
         for r in range(root.rowCount()): recurse(root.child(r))
         return files
-
-    def _load_and_populate_golden_rule_sets(self):
-        self.golden_rule_sets = settings_manager.get("ai_export_golden_rules", {})
-        self.golden_rules_combo.clear()
-        for name in sorted(self.golden_rule_sets.keys()): self.golden_rules_combo.addItem(name)
-        if "Default Golden Rules" in self.golden_rule_sets: self.golden_rules_combo.setCurrentText("Default Golden Rules")
-        else: self.golden_rules_combo.setCurrentIndex(-1)
-        self._on_golden_rule_set_selected()
-
-    def _on_golden_rule_set_selected(self):
-        name = self.golden_rules_combo.currentText()
-        self.golden_rules_list.clear()
-        if rules := self.golden_rule_sets.get(name): self.golden_rules_list.addItems(rules)
-    
-    def _save_golden_rule_set(self):
-        name, ok = QInputDialog.getText(self, "Save Rule Set", "Enter name for new rule set:")
-        if not (ok and name): return
-        if name in self.golden_rule_sets:
-            QMessageBox.warning(self, "Name Exists", "A rule set with this name already exists.")
-            return
-        rules = [self.golden_rules_list.item(i).text() for i in range(self.golden_rules_list.count())]
-        self.golden_rule_sets[name] = rules
-        settings_manager.set("ai_export_golden_rules", self.golden_rule_sets)
-        self._load_and_populate_golden_rule_sets()
-        if (new_index := self.golden_rules_combo.findText(name)) != -1: self.golden_rules_combo.setCurrentIndex(new_index)
-        QMessageBox.information(self, "Success", f"Golden Rule set '{name}' saved.")

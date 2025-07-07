@@ -4,6 +4,7 @@ from functools import partial
 from PyQt6.QtWidgets import QMenu, QApplication, QMessageBox
 from PyQt6.QtCore import QPoint
 import qtawesome as qta
+from app_core.project_manager import ProjectManager
 
 
 def _copy_to_clipboard(text: str):
@@ -12,7 +13,7 @@ def _copy_to_clipboard(text: str):
         clip.setText(text)
 
 
-def show_project_context_menu(panel, position: QPoint, path: str, is_dir: bool):
+def show_project_context_menu(panel, position: QPoint, path: str, is_dir: bool, project_manager: ProjectManager):
     """
     Creates and displays the context menu for the project explorer.
     """
@@ -22,6 +23,7 @@ def show_project_context_menu(panel, position: QPoint, path: str, is_dir: bool):
     # Check if a valid item was clicked
     item = tree.itemAt(position)
     is_valid_selection = item is not None
+    is_project_root = path in project_manager.get_open_projects()
 
     menu = QMenu(tree)
     menu.addAction(qta.icon('mdi.file-plus-outline'), "New File...", partial(panel._action_new_file, target_dir))
@@ -29,13 +31,18 @@ def show_project_context_menu(panel, position: QPoint, path: str, is_dir: bool):
 
     if is_valid_selection:
         menu.addSeparator()
+        if is_project_root:
+            menu.addAction(qta.icon('mdi.folder-remove-outline'), "Close Project",
+                           partial(project_manager.close_project, path))
+            menu.addSeparator()
+
         menu.addAction(qta.icon('mdi.pencil-outline'), "Rename...", partial(panel._action_rename, path))
         menu.addAction(qta.icon('mdi.trash-can-outline', color='crimson'), "Delete", partial(panel._action_delete, path))
         menu.addAction(qta.icon('mdi.content-copy'), "Duplicate", partial(panel._action_duplicate, path))
         menu.addSeparator()
 
-        if path.lower().endswith('.py') and not is_dir:
-            runner_plugin = panel.api.get_plugin_instance("pythong_tools")
+        if path.lower().endswith(('.py', '.js', '.cpp', '.c', '.cs')) and not is_dir:
+            runner_plugin = panel.api.get_plugin_instance("script_runner")
             if runner_plugin:
                 menu.addAction(qta.icon('mdi.play-outline', color='#4CAF50'), "Run Script",
                                lambda: runner_plugin.run_specific_script(path))

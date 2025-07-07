@@ -35,7 +35,7 @@ class PuffinPluginAPI:
             log.warning(f"Plugin requested an unknown manager: '{manager_name}'")
         return manager
 
-    def add_dock_panel(self, widget: QWidget, title: str, area_str: str, icon_name: Optional[str] = None):
+    def add_dock_panel(self, widget: QWidget, title: str, area_str: str, icon_name: Optional[str] = None) -> Optional[QDockWidget]:
         area_map = {
             "left": Qt.DockWidgetArea.LeftDockWidgetArea,
             "right": Qt.DockWidgetArea.RightDockWidgetArea,
@@ -45,9 +45,8 @@ class PuffinPluginAPI:
         qt_area = area_map.get(area_str.lower())
         if not qt_area:
             self.log_error(f"Invalid dock area specified: '{area_str}'");
-            return
+            return None
 
-        # THE FIX: This now correctly calls the method on the main window instance.
         return self._main_window.add_dock_panel(widget, title, qt_area, icon_name)
 
     def get_plugin_instance(self, plugin_id: str) -> Optional[Any]:

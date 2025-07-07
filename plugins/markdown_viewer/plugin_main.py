@@ -14,7 +14,7 @@ class MarkdownPlugin:
     def __init__(self, puffin_api: PuffinPluginAPI):
         self.api = puffin_api
         self.main_window = self.api.get_main_window()
-        self.completion_manager = self.main_window.completion_manager
+        self.completion_manager = self.api.get_manager("completion")
         self.instances = {}  # Track open editor instances
 
         # Register our custom editor widget as the handler for .md files
@@ -43,7 +43,6 @@ class MarkdownPlugin:
 
         log.info(f"Markdown Editor: Creating new dual-pane view for '{filepath}'.")
 
-        # THE FIX: Pass the completion_manager argument.
         editor = MarkdownEditorWidget(
             puffin_api=self.api,
             completion_manager=self.completion_manager,

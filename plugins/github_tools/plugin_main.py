@@ -52,7 +52,6 @@ class UploadProgressDialog(QDialog):
     def set_step(self, step_name: str):
         self.step_label.setText(f"Step: {step_name}")
 
-    # FIX: Add 'is_warning' parameter to handle a third color state
     def add_log(self, message: str, is_error: bool = False, is_warning: bool = False):
         if is_error:
             color = "#FF5555"
@@ -91,7 +90,6 @@ class GitHubToolsPlugin:
     def _get_sc_panel(self):
         return getattr(self.main_window, 'source_control_panel', None)
 
-    # FIX: Add 'is_warning' parameter to match the call site
     def _log_to_dialog(self, message: str, is_error: bool = False, is_warning: bool = False):
         log_func = self.api.log_error if is_error else (self.api.log_warning if is_warning else self.api.log_info)
         log_func(f"[Release] {message}")
@@ -360,7 +358,8 @@ class GitHubToolsPlugin:
         private = QMessageBox.question(self.main_window, "Visibility", "Make repository private?",
                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes
         self.github_manager.create_repo(repo_name, desc, private)
-        self.api.get_main_window().source_control_panel.set_ui_locked(True, f"Creating '{repo_name}'...")
+        if sc_panel := self._get_sc_panel():
+            sc_panel.set_ui_locked(True, f"Creating '{repo_name}'...")
 
     def _link_repo(self, path):
         if not self.ensure_git_identity(path): return

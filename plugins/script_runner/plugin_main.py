@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QMessageBox
 from PyQt6.QtCore import QObject, QProcess, QTimer
 from app_core.puffin_api import PuffinPluginAPI
 from .output_panel import OutputPanel
-from .code_runner import CodeRunner, _find_python_interpreter
+from .code_runner import _find_python_interpreter
 from utils.logger import log
 
 
@@ -103,9 +103,20 @@ class ScriptRunnerPlugin(QObject):
             self.main_window._action_save_file()
 
         return filepath
+        
+    def run_specific_script(self, filepath: str):
+        """Runs a script from a given path, bypassing the active tab."""
+        ext = os.path.splitext(filepath)[1].lower()
+        for config_ext, config in self.RUN_CONFIG.items():
+            if ext == config_ext:
+                # Call the handler with the specific filepath
+                config['handler'](filepath=filepath)
+                return
+        self.api.show_message("warning", "Unsupported File Type", f"No run configuration for '{ext}' files.")
 
-    def _run_python_script(self):
-        if not (filepath := self._get_current_filepath()): return
+    def _run_python_script(self, filepath: str = None):
+        filepath = filepath or self._get_current_filepath()
+        if not filepath: return
         if not (interpreter_path := _find_python_interpreter()):
             self.api.show_message("critical", "Python Not Found", "Could not find a Python interpreter.")
             return
@@ -113,8 +124,9 @@ class ScriptRunnerPlugin(QObject):
         self._current_task_info = {'name': 'Python Script'}
         self._start_process(interpreter_path, [filepath])
 
-    def _run_node_script(self):
-        if not (filepath := self._get_current_filepath()): return
+    def _run_node_script(self, filepath: str = None):
+        filepath = filepath or self._get_current_filepath()
+        if not filepath: return
         if not (node_path := shutil.which("node")):
             self.api.show_message("critical", "Node.js Not Found", "Could not find 'node' on your system PATH.")
             return
@@ -122,8 +134,9 @@ class ScriptRunnerPlugin(QObject):
         self._current_task_info = {'name': 'Node.js Script'}
         self._start_process(node_path, [filepath])
 
-    def _compile_run_cpp(self):
-        if not (source_path := self._get_current_filepath()): return
+    def _compile_run_cpp(self, filepath: str = None):
+        source_path = filepath or self._get_current_filepath()
+        if not source_path: return
         compiler_path = shutil.which("g++") or shutil.which("cl")
         if not compiler_path:
             self.api.show_message("critical", "Compiler Not Found", "No C++ compiler (g++ or cl.exe) found.")
@@ -141,8 +154,9 @@ class ScriptRunnerPlugin(QObject):
         self._current_task_info = {'name': 'C++ Compilation', 'type': 'compile', 'runner_path': exe_path}
         self._start_process(compiler_path, args)
 
-    def _compile_run_csharp(self):
-        if not (source_path := self._get_current_filepath()): return
+    def _compile_run_csharp(self, filepath: str = None):
+        source_path = filepath or self._get_current_filepath()
+        if not source_path: return
         if not (compiler_path := shutil.which("csc")):
             self.api.show_message("critical", "C# Compiler Not Found", "C# compiler (csc.exe) not found.")
             return
@@ -168,7 +182,7 @@ class ScriptRunnerPlugin(QObject):
         self.process.readyReadStandardOutput.connect(self._handle_stdout)
         self.process.readyReadStandardError.connect(self._handle_stderr)
         self.process.finished.connect(self._handle_finished)
-        self.process.setWorkingDirectory(os.path.dirname(program))
+        self.process.setWorkingDirectory(os.path.dirname(args[0]))
 
         self.stop_action.setEnabled(True)
         self.process.start(program, args)
@@ -198,7 +212,7 @@ class ScriptRunnerPlugin(QObject):
         else:  # Standard run or second step of compile-run
             self.output_panel.append_output(f"\n[{task_name}] Finished with exit code {exit_code}.")
             runner_path = self._current_task_info.get('runner_path')
-            if runner_path and os.path.exists(runner_path) and self._current_task_info.get('type') != 'python_script':
+            if runner_path and os.path.exists(runner_path) and not filepath.endswith('.py'):
                 try:
                     os.remove(runner_path)
                 except OSError as e:

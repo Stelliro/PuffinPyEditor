@@ -57,14 +57,12 @@ class ExceptionDialog(QDialog):
         report_button = self.button_box.addButton(
             "Report on GitHub", QDialogButtonBox.ButtonRole.HelpRole
         )
-        # MODIFIED: Changed button text for clarity
         quit_button = self.button_box.addButton(
             "Quit Application", QDialogButtonBox.ButtonRole.DestructiveRole
         )
 
         copy_button.clicked.connect(self._copy_to_clipboard)
         report_button.clicked.connect(self._open_github_issues)
-        # THE FIX: Connect to the application's quit method for a hard exit.
         quit_button.clicked.connect(self._force_quit_app)
 
         layout.addWidget(self.button_box)

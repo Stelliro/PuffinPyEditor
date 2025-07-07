@@ -136,7 +136,6 @@ class MarkdownSyntaxHighlighter(QSyntaxHighlighter):
             self.setFormat(match.capturedStart(3), len(match.captured(3)), self.formats['marker'])
 
             if fmt_name == 'inline_code':
-                # --- FIX: Convert QBrush to QColor using .color() ---
                 code_bg_color = self.formats['inline_code'].background().color()
                 original_marker_fg = self.formats['marker'].foreground().color()
 
@@ -165,7 +164,6 @@ class MarkdownSyntaxHighlighter(QSyntaxHighlighter):
             self.setCurrentBlockState(0)
 
         if is_in_code_block:
-            # --- FIX: Convert QBrush to QColor using .color() ---
             code_bg = self.formats['code_block'].background().color()
             corrected_fg = self._get_high_contrast_color(self.default_fg, code_bg)
 

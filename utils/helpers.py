@@ -2,6 +2,7 @@
 import sys
 import os
 import re
+import difflib
 from typing import List, Optional
 from PyQt6.QtGui import QFontDatabase
 from .logger import log
@@ -30,7 +31,6 @@ def get_base_path():
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-# NEW: Moved from ProjectManager to be a reusable utility function.
 def clean_git_conflict_markers(content: str) -> str:
     """Removes Git conflict markers from a string, keeping the HEAD version."""
     if '<<<<<<<' not in content:
@@ -63,6 +63,14 @@ def clean_git_conflict_markers(content: str) -> str:
             cleaned_lines.append(line)
 
     return "\n".join(cleaned_lines)
+
+
+def generate_unified_diff(original_content: str, new_content: str, fromfile='original', tofile='new') -> str:
+    """Generates a git-style unified diff string."""
+    original_lines = original_content.splitlines(keepends=True)
+    new_lines = new_content.splitlines(keepends=True)
+    diff = difflib.unified_diff(original_lines, new_lines, fromfile=fromfile, tofile=tofile)
+    return "".join(diff)
 
 
 def get_startup_shortcut_path() -> Optional[str]:
@@ -115,4 +123,4 @@ def get_best_available_font(preferred_list: List[str]) -> Optional[str]:
         f"Could not find any of the preferred fonts: {preferred_list}. "
         "The application will use a system default."
     )
-    return Nones
+    return None

@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem,
 from PyQt6.QtGui import (QPainter, QColor, QPen, QDrag, QKeyEvent, QIcon, QPaintEvent, QDragEnterEvent, QDropEvent, QDragMoveEvent)
 from PyQt6.QtCore import (Qt, QFileInfo, QMimeData, QRect, QFileSystemWatcher, QTimer, QPoint, QPointF,
                           QUrl)
-
+from functools import partial
 import qtawesome as qta
 
 from app_core.puffin_api import PuffinPluginAPI
@@ -296,7 +296,12 @@ class FileSystemListView(QWidget):
         layout.addLayout(toolbar_layout)
 
         self.tree_widget = StyledTreeView(self.api, self)
-        self.tree_widget.setHeaderHidden(True)
+        self.tree_widget.setHeaderLabels(["Project / File", ""])
+        header = self.tree_widget.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(1, 60) # Width for reorder buttons
+
         self.tree_widget.setAlternatingRowColors(True)
         self.tree_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree_widget.setIndentation(14)
@@ -383,6 +388,15 @@ class FileSystemListView(QWidget):
             log.debug(f"External FS event for: {path}. Scheduling refresh.")
             self._refresh_timer.start()
 
+    def _move_project(self, path: str, direction: str):
+        modifiers = QApplication.keyboardModifiers()
+        is_shift_pressed = modifiers == Qt.KeyboardModifier.ShiftModifier
+
+        if is_shift_pressed:
+            self.project_manager.move_project_to_end(path, to_top=(direction == 'up'))
+        else:
+            self.project_manager.move_project(path, direction)
+
     def refresh(self):
         log.info("Refreshing file explorer view.")
 
@@ -454,6 +468,22 @@ class FileSystemListView(QWidget):
             item.setIcon(0, qta.icon('mdi.folder-open-outline', color=colors.get('accent')))
             item.setData(0, Qt.ItemDataRole.UserRole, {'path': norm_path, 'is_dir': True, 'is_root': True})
             item.setExpanded(True)
+
+            # Add reorder controls for project root items
+            controls_widget = QWidget()
+            controls_layout = QHBoxLayout(controls_widget)
+            controls_layout.setContentsMargins(0, 0, 0, 0)
+            controls_layout.setSpacing(2)
+            up_button = QToolButton(icon=qta.icon('mdi.arrow-up-bold-box-outline'), toolTip="Move project up")
+            down_button = QToolButton(icon=qta.icon('mdi.arrow-down-bold-box-outline'), toolTip="Move project down")
+            up_button.clicked.connect(partial(self._move_project, norm_path, 'up'))
+            down_button.clicked.connect(partial(self._move_project, norm_path, 'down'))
+            for btn in [up_button, down_button]: btn.setAutoRaise(True)
+            controls_layout.addStretch()
+            controls_layout.addWidget(up_button)
+            controls_layout.addWidget(down_button)
+            self.tree_widget.setItemWidget(item, 1, controls_widget)
+
             build_tree_level(item, norm_path)
 
         self.tree_widget.blockSignals(False)
@@ -548,7 +578,7 @@ class FileSystemListView(QWidget):
             is_dir = data.get('is_dir')
 
         if not path: return
-        show_project_context_menu(self, position, path, is_dir)
+        show_project_context_menu(self, position, path, is_dir, self.project_manager)
 
     def _perform_file_operation(self, operation, *args, return_result=False):
         self._is_programmatic_change = True
