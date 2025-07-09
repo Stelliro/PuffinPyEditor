@@ -17,6 +17,7 @@ class TerminalPlugin:
         """Creates and registers the terminal panel and menu action."""
         self.terminal_widget = TerminalWidget(self.api)
 
+        # THE FIX: This call now passes a string for the area, as expected by the API layer.
         dock = self.api.add_dock_panel(
             area_str="bottom",
             widget=self.terminal_widget,
@@ -24,7 +25,7 @@ class TerminalPlugin:
             icon_name="mdi.console"
         )
 
-        if dock:
+        if dock and dock.toggleViewAction():
             self.api.add_menu_action(
                 menu_name="view",
                 text="Terminal",

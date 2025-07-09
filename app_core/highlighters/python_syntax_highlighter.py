@@ -1,9 +1,11 @@
 # PuffinPyEditor/app_core/highlighters/python_syntax_highlighter.py
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, TYPE_CHECKING
 from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 from PyQt6.QtCore import QRegularExpression
-from app_core.theme_manager import theme_manager
 from utils.logger import log
+
+if TYPE_CHECKING:
+    from app_core.theme_manager import ThemeManager
 
 
 class PythonSyntaxHighlighter(QSyntaxHighlighter):
@@ -12,8 +14,9 @@ class PythonSyntaxHighlighter(QSyntaxHighlighter):
     current theme from the ThemeManager.
     """
 
-    def __init__(self, parent_document):
+    def __init__(self, parent_document, theme_manager: "ThemeManager"):
         super().__init__(parent_document)
+        self.theme_manager = theme_manager
         self.highlighting_rules: List[Tuple[QRegularExpression, QTextCharFormat]] = []
         self.multiline_string_format = QTextCharFormat()
 
@@ -26,7 +29,7 @@ class PythonSyntaxHighlighter(QSyntaxHighlighter):
         the regular expression rules for highlighting.
         """
         formats: Dict[str, QTextCharFormat] = {}
-        colors = theme_manager.current_theme_data.get("colors", {})
+        colors = self.theme_manager.current_theme_data.get("colors", {})
 
         def get_color(key: str, fallback: str) -> QColor:
             return QColor(colors.get(f"syntax.{key}", fallback))
@@ -167,7 +170,7 @@ class PythonSyntaxHighlighter(QSyntaxHighlighter):
                     next_match = match
                     next_state_to_set = state_to_set
                     next_delimiter_re = delimiter_re
-            
+
             if not next_match:
                 break  # No more delimiters found in the remaining text.
 
@@ -186,8 +189,8 @@ class PythonSyntaxHighlighter(QSyntaxHighlighter):
                 self.setFormat(start_pos, len(text) - start_pos, self.multiline_string_format)
                 return
 
-    def rehighlight_document(self):
+    def rehighlight(self):
         """Forces a re-highlight of the entire document."""
-        log.info("Re-highlighting entire document for syntax.")
+        log.info("Re-highlighting entire document for Python syntax.")
         self.initialize_formats_and_rules()
         super().rehighlight()

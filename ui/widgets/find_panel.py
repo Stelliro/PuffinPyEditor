@@ -7,12 +7,12 @@ from PyQt6.QtCore import Qt, pyqtSignal
 import qtawesome as qta
 
 from app_core.settings_manager import settings_manager
-from app_core.theme_manager import theme_manager
 
 # This is a super neat trick I learned to prevent circular import errors!
 # It lets me use EditorWidget for type hinting without actually importing it at runtime.
 if TYPE_CHECKING:
     from ..editor_widget import EditorWidget
+    from app_core.theme_manager import ThemeManager
 
 
 class FindPanel(QFrame):
@@ -22,10 +22,11 @@ class FindPanel(QFrame):
     # This signal asks the main window to show a message in the status bar.
     status_message_requested = pyqtSignal(str, int)
 
-    def __init__(self, parent: QWidget):
+    def __init__(self, theme_manager: "ThemeManager", parent: QWidget):
         super().__init__(parent)
         # This will be the editor widget this panel is currently controlling.
         self.editor: Optional["EditorWidget"] = None
+        self.theme_manager = theme_manager
         # Giving this an object name is great for styling with CSS-like QSS!
         self.setObjectName("FindPanelFrame")
         self._setup_ui()
@@ -134,7 +135,7 @@ class FindPanel(QFrame):
 
     def update_theme(self):
         # Applies the current theme's colors to the panel.
-        colors = theme_manager.current_theme_data['colors']
+        colors = self.theme_manager.current_theme_data['colors']
         frame_bg = colors.get('sidebar.background', '#333')
         self.setStyleSheet(
             f"#FindPanelFrame {{ background-color: {frame_bg}; "

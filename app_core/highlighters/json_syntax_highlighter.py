@@ -1,22 +1,25 @@
-# PuffinPyEditor/plugins/basic_highlighters/json_syntax_highlighter.py
+# PuffinPyEditor/app_core/highlighters/json_syntax_highlighter.py
+from typing import TYPE_CHECKING
 from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 from PyQt6.QtCore import QRegularExpression
-from app_core.theme_manager import theme_manager
 from utils.logger import log
 
+if TYPE_CHECKING:
+    from app_core.theme_manager import ThemeManager
 
 class JsonSyntaxHighlighter(QSyntaxHighlighter):
     """A syntax highlighter for JSON files."""
 
-    def __init__(self, parent_document):
+    def __init__(self, parent_document, theme_manager: "ThemeManager"):
         super().__init__(parent_document)
+        self.theme_manager = theme_manager
         self.highlighting_rules = []
         self.initialize_formats_and_rules()
         log.info("JsonSyntaxHighlighter initialized.")
 
     def initialize_formats_and_rules(self):
         """Initializes formats and rules based on the current theme."""
-        colors = theme_manager.current_theme_data.get("colors", {})
+        colors = self.theme_manager.current_theme_data.get("colors", {})
 
         def get_color(key: str, fallback: str) -> QColor:
             return QColor(colors.get(f"syntax.{key}", fallback))
@@ -42,19 +45,11 @@ class JsonSyntaxHighlighter(QSyntaxHighlighter):
         brace_format = QTextCharFormat()
         brace_format.setForeground(get_color("brace", "#d3c6aa"))
 
-        # MODIFIED: Reordered rules for correct application.
-        # The last rule applied to a character wins, so we apply the general
-        # string format first, then overwrite keys with the more specific key format.
         self.highlighting_rules = [
-            # Braces and brackets
             (QRegularExpression(r'[\{\}\[\]]'), brace_format),
-            # Keywords: true, false, null
             (QRegularExpression(r'\b(true|false|null)\b'), keyword_format),
-            # Numbers
             (QRegularExpression(r'\b-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?\b'), number_format),
-            # All strings get the generic string format first.
             (QRegularExpression(r'"[^"\\]*(\\.[^"\\]*)*"'), string_format),
-            # Then, re-apply the more specific 'key' format over the top for keys.
             (QRegularExpression(r'"[^"\\]*(\\.[^"\\]*)*"(?=\s*:)'), key_format),
         ]
 
@@ -66,7 +61,7 @@ class JsonSyntaxHighlighter(QSyntaxHighlighter):
                 match = iterator.next()
                 self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
 
-    def rehighlight_document(self):
+    def rehighlight(self):
         """Forces a re-highlight of the entire document on theme change."""
         self.initialize_formats_and_rules()
         super().rehighlight()

@@ -4,7 +4,6 @@ import json
 import base64
 import shutil
 from typing import Dict, Any, Optional
-from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QColor
 
 from app_core.settings_manager import settings_manager
@@ -107,7 +106,10 @@ class ThemeManager:
             last_theme_id = "puffin_dark"
             settings_manager.set("last_theme_id", last_theme_id)
         self.current_theme_id = last_theme_id
-        self.set_theme(self.current_theme_id)
+        # We don't call set_theme here anymore to avoid circular dependencies
+        self.current_theme_data = self.all_themes_data.get(self.current_theme_id, {})
+        if 'colors' in self.current_theme_data:
+            self.current_theme_data['colors']['icon.colors'] = self.icon_colors
 
     def _load_icon_colors(self) -> Dict[str, str]:
         """Loads default and user icon colors, with user settings overriding defaults."""
@@ -121,10 +123,10 @@ class ThemeManager:
                 log.error(f"Failed to copy default icon colors: {e}")
 
         try:
-            with open(DEFAULT_ICON_COLORS_FILE_PATH, 'r') as f:
+            with open(DEFAULT_ICON_COLORS_FILE_PATH, 'r', encoding='utf-8') as f:
                 colors.update(json.load(f))
             if os.path.exists(ICON_COLORS_FILE_PATH):
-                with open(ICON_COLORS_FILE_PATH, 'r') as f:
+                with open(ICON_COLORS_FILE_PATH, 'r', encoding='utf-8') as f:
                     colors.update(json.load(f))
         except (IOError, json.JSONDecodeError) as e:
             log.error(f"Could not load icon color schemes: {e}")
@@ -133,17 +135,22 @@ class ThemeManager:
 
     def _load_all_themes(self) -> Dict[str, Dict]:
         all_themes = BUILT_IN_THEMES.copy()
-        if not os.path.exists(CUSTOM_THEMES_FILE_PATH) and os.path.exists(DEFAULT_CUSTOM_THEMES_FILE_PATH):
+        custom_themes_path = os.path.join(get_app_data_path(), "custom_themes.json")
+        default_custom_themes_path = os.path.join(get_base_path(), "assets", "themes", "custom_themes.json")
+
+        if not os.path.exists(custom_themes_path) and os.path.exists(default_custom_themes_path):
             try:
-                os.makedirs(os.path.dirname(CUSTOM_THEMES_FILE_PATH), exist_ok=True)
-                shutil.copy2(DEFAULT_CUSTOM_THEMES_FILE_PATH, CUSTOM_THEMES_FILE_PATH)
+                os.makedirs(os.path.dirname(custom_themes_path), exist_ok=True)
+                shutil.copy2(default_custom_themes_path, custom_themes_path)
             except Exception as e:
                 log.error(f"Failed to copy default custom themes: {e}")
-        if os.path.exists(CUSTOM_THEMES_FILE_PATH):
+
+        if os.path.exists(custom_themes_path):
             try:
-                with open(CUSTOM_THEMES_FILE_PATH, 'r') as f:
+                with open(custom_themes_path, 'r', encoding='utf-8') as f:
                     custom_themes = json.load(f)
-                    for theme in custom_themes.values(): theme['is_custom'] = True
+                    for theme in custom_themes.values():
+                        theme['is_custom'] = True
                     all_themes.update(custom_themes)
             except Exception as e:
                 log.error(f"Error loading custom themes: {e}")
@@ -153,22 +160,53 @@ class ThemeManager:
         return {tid: d.get("name", tid) for tid, d in
                 sorted(self.all_themes_data.items(), key=lambda i: i[1].get("name", i[0]).lower())}
 
-    def set_theme(self, theme_id: str, app_instance: Optional[QApplication] = None):
-        if theme_id not in self.all_themes_data: theme_id = "puffin_dark"
+    def set_theme(self, theme_id: str, app_instance: Optional['QApplication'] = None):
+        if theme_id not in self.all_themes_data:
+            theme_id = "puffin_dark"
         self.current_theme_id = theme_id
         self.current_theme_data = self.all_themes_data.get(theme_id, {})
 
         if 'colors' not in self.current_theme_data:
             log.warning(f"Theme '{theme_id}' is missing the 'colors' dictionary. UI may not render correctly.")
-
-        if 'colors' in self.current_theme_data:
+        else:
             self.current_theme_data['colors']['icon.colors'] = self.icon_colors
 
         settings_manager.set("last_theme_id", theme_id)
+        # Import moved here to avoid circular dependency
+        from PyQt6.QtWidgets import QApplication
         self.apply_theme_to_app(app_instance or QApplication.instance())
         log.info(f"Theme set to '{self.current_theme_data.get('name', 'Unknown')}'")
 
-    def apply_theme_to_app(self, app: Optional[QApplication]):
+    def add_or_update_custom_theme(self, theme_id: str, theme_data: dict):
+        custom_themes_path = os.path.join(get_app_data_path(), "custom_themes.json")
+        try:
+            custom_themes = {}
+            if os.path.exists(custom_themes_path):
+                with open(custom_themes_path, 'r', encoding='utf-8') as f:
+                    custom_themes = json.load(f)
+            custom_themes[theme_id] = theme_data
+            with open(custom_themes_path, 'w', encoding='utf-8') as f:
+                json.dump(custom_themes, f, indent=4)
+            self.reload_themes()
+        except (IOError, json.JSONDecodeError) as e:
+            log.error(f"Failed to save custom theme '{theme_id}': {e}")
+
+    def delete_custom_theme(self, theme_id: str):
+        custom_themes_path = os.path.join(get_app_data_path(), "custom_themes.json")
+        try:
+            custom_themes = {}
+            if os.path.exists(custom_themes_path):
+                with open(custom_themes_path, 'r', encoding='utf-8') as f:
+                    custom_themes = json.load(f)
+            if theme_id in custom_themes:
+                del custom_themes[theme_id]
+                with open(custom_themes_path, 'w', encoding='utf-8') as f:
+                    json.dump(custom_themes, f, indent=4)
+                self.reload_themes()
+        except (IOError, json.JSONDecodeError) as e:
+            log.error(f"Failed to delete custom theme '{theme_id}': {e}")
+
+    def apply_theme_to_app(self, app: Optional['QApplication']):
         if not app or not self.current_theme_data: return
         colors = self.current_theme_data.get("colors", {})
 
@@ -225,7 +263,7 @@ class ThemeManager:
                 color: {c('statusbar.foreground', '#d3c6aa')};
             }}
 
-            /* Tabs */
+            /* THEME: Signature Tab Bar Styling */
             QTabWidget::pane {{ border: none; }}
             QTabBar::tab {{
                 background: transparent; color: {c('tab.inactiveForeground', '#5f6c6d')};
@@ -233,6 +271,14 @@ class ThemeManager:
             }}
             QTabBar::tab:hover {{ background: {adj(wb, 110)}; }}
             QTabBar::tab:selected {{ color: {c('tab.activeForeground', '#d3c6aa')}; border-bottom: 2px solid {ac}; }}
+            /* Specific style for editor tabs to blend the bottom border */
+            QTabWidget#MainTabWidget > QTabBar::tab:selected {{ border-bottom-color: {c('editor.background', '#272e33')}; }}
+
+            /* THEME: Signature Toolbar Styling */
+            QFrame#ExplorerToolbar {{
+                background-color: {c('sidebar.background', '#2a3338')};
+                border-bottom: 1px solid {c('input.border', '#5f6c6d')};
+            }}
 
             /* Inputs */
             QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox {{
@@ -263,7 +309,7 @@ class ThemeManager:
             QAbstractItemView {{ background-color: {sb}; outline: 0; }}
             QTreeView, QListWidget, QTableWidget, QTreeWidget {{ alternate-background-color: {adj(sb, 103)}; }}
             QTreeView::item:hover, QListWidget::item:hover {{ background-color: {adj(sb, 120)}; }}
-            QTreeView::item:selected, QListWidget::item:selected {{ background-color: {ac}; color: {c('button.foreground', '#000')}; }}
+            QTreeView::item:selected {{ background-color: {ac}; color: {c('button.foreground', '#000')}; }}
             QHeaderView::section {{ background-color: {adj(sb, 110)}; padding: 4px; border: 1px solid {wb}; }}
             QDockWidget::title {{
                 background-color: {adj(wb, 105)}; text-align: left; padding: 5px;
@@ -287,5 +333,3 @@ class ThemeManager:
             QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
         """
         app.setStyleSheet(stylesheet)
-
-theme_manager = ThemeManager()

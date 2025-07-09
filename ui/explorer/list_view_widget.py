@@ -1,12 +1,12 @@
 # PuffinPyEditor/ui/explorer/list_view_widget.py
 import os
 import sys
-# MODIFIED: Added imports for typing and more Qt modules for drag-and-drop
 from typing import List, Optional
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QInputDialog, QMessageBox,
                              QProxyStyle, QStyle, QApplication, QAbstractItemView, QToolButton,
-                             QHBoxLayout, QTreeWidgetItemIterator)
-from PyQt6.QtGui import (QPainter, QColor, QPen, QDrag, QKeyEvent, QIcon, QPaintEvent, QDragEnterEvent, QDropEvent, QDragMoveEvent)
+                             QHBoxLayout, QTreeWidgetItemIterator, QHeaderView, QFrame)
+from PyQt6.QtGui import (QPainter, QColor, QPen, QDrag, QKeyEvent, QIcon, QPaintEvent, QDragEnterEvent, QDropEvent,
+                         QDragMoveEvent)
 from PyQt6.QtCore import (Qt, QFileInfo, QMimeData, QRect, QFileSystemWatcher, QTimer, QPoint, QPointF,
                           QUrl)
 from functools import partial
@@ -192,7 +192,7 @@ class StyledTreeView(QTreeWidget):
         if not target_path:
             event.ignore()
             return
-            
+
         if os.path.normpath(source_path) == os.path.normpath(target_path):
             event.ignore()
             return
@@ -226,18 +226,19 @@ class StyledTreeView(QTreeWidget):
 
         dest_dir = target_path if target_data.get('is_dir') else os.path.dirname(target_path)
 
-        is_copy = (event.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier) == Qt.KeyboardModifier.ControlModifier
-        
+        is_copy = (
+                              event.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier) == Qt.KeyboardModifier.ControlModifier
+
         operation = self.file_handler.copy_item_to_dest if is_copy else self.file_handler.move_item
-        
-        # MODIFIED: Call the file operation and then explicitly refresh the UI.
-        success, new_path = self.parent_view._perform_file_operation(operation, source_path, dest_dir, return_result=True)
+
+        success, new_path = self.parent_view._perform_file_operation(operation, source_path, dest_dir,
+                                                                     return_result=True)
         if success:
             log.info("Drag-and-drop operation successful, refreshing tree view.")
             self.parent_view.refresh()
             # After refreshing, try to select the newly moved/copied item
             QTimer.singleShot(150, lambda p=new_path: self.parent_view._select_and_scroll_to_path(p))
-            
+
         event.acceptProposedAction()
 
     def keyPressEvent(self, event: QKeyEvent):
@@ -273,34 +274,44 @@ class FileSystemListView(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(5)
+        layout.setContentsMargins(0, 0, 0, 0)  # Use 0 margins for the main layout
+        layout.setSpacing(0)  # No spacing between toolbar and tree
 
-        toolbar_layout = QHBoxLayout()
+        # Create a QFrame to act as the styled toolbar
+        toolbar_frame = QFrame()
+        toolbar_frame.setObjectName("ExplorerToolbar")
+        toolbar_layout = QHBoxLayout(toolbar_frame)
+        toolbar_layout.setContentsMargins(5, 2, 5, 2)
+        toolbar_layout.setSpacing(5)
+
         self.expand_button = QToolButton()
         self.expand_button.setIcon(qta.icon('mdi.arrow-expand-all', color='gray'))
         self.expand_button.setToolTip("Expand All")
+        self.expand_button.setAutoRaise(True)
 
         self.collapse_button = QToolButton()
         self.collapse_button.setIcon(qta.icon('mdi.arrow-collapse-all', color='gray'))
         self.collapse_button.setToolTip("Collapse All")
+        self.collapse_button.setAutoRaise(True)
 
         self.refresh_button = QToolButton()
         self.refresh_button.setIcon(qta.icon('mdi.refresh', color='gray'))
         self.refresh_button.setToolTip("Refresh")
+        self.refresh_button.setAutoRaise(True)
 
         toolbar_layout.addStretch()
         toolbar_layout.addWidget(self.expand_button)
         toolbar_layout.addWidget(self.collapse_button)
         toolbar_layout.addWidget(self.refresh_button)
-        layout.addLayout(toolbar_layout)
+
+        layout.addWidget(toolbar_frame)
 
         self.tree_widget = StyledTreeView(self.api, self)
         self.tree_widget.setHeaderLabels(["Project / File", ""])
         header = self.tree_widget.header()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        header.resizeSection(1, 60) # Width for reorder buttons
+        header.resizeSection(1, 60)  # Width for reorder buttons
 
         self.tree_widget.setAlternatingRowColors(True)
         self.tree_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -433,6 +444,7 @@ class FileSystemListView(QWidget):
 
                     norm_entry_path = os.path.normpath(entry.path)
                     child_item = QTreeWidgetItem(parent_item, [entry.name])
+                    child_item.setFirstColumnSpanned(True)
                     child_item.setIcon(0, self.icon_provider.icon(QFileInfo(entry.path)))
                     child_item.setData(0, Qt.ItemDataRole.UserRole, {'path': norm_entry_path, 'is_dir': entry.is_dir()})
 
@@ -473,7 +485,7 @@ class FileSystemListView(QWidget):
             controls_widget = QWidget()
             controls_layout = QHBoxLayout(controls_widget)
             controls_layout.setContentsMargins(0, 0, 0, 0)
-            controls_layout.setSpacing(2)
+            controls_layout.setSpacing(0)  # Make controls tighter
             up_button = QToolButton(icon=qta.icon('mdi.arrow-up-bold-box-outline'), toolTip="Move project up")
             down_button = QToolButton(icon=qta.icon('mdi.arrow-down-bold-box-outline'), toolTip="Move project down")
             up_button.clicked.connect(partial(self._move_project, norm_path, 'up'))
@@ -514,8 +526,13 @@ class FileSystemListView(QWidget):
         if not path: return
         item_to_select = self._find_item_by_path(self.tree_widget.invisibleRootItem(), os.path.normpath(path))
         if item_to_select:
-            self.tree_widget.setCurrentItem(item_to_select)
-            self.tree_widget.scrollToItem(item_to_select, QAbstractItemView.ScrollHint.PositionAtCenter)
+            try:
+                # THE FIX: Wrap the potentially problematic call in a try/except block.
+                # This prevents a crash if the item has been deleted during the refresh.
+                self.tree_widget.scrollToItem(item_to_select, QAbstractItemView.ScrollHint.PositionAtCenter)
+                self.tree_widget.setCurrentItem(item_to_select)
+            except RuntimeError as e:
+                log.warning(f"Handled expected runtime error during scroll: {e}")
 
     def on_item_expanded(self, item: QTreeWidgetItem):
         if self._is_programmatic_change: return
@@ -545,6 +562,7 @@ class FileSystemListView(QWidget):
                 if entry.name.startswith(('.', '__pycache__')) or entry.name == 'venv':
                     continue
                 child_item = QTreeWidgetItem(parent_item, [entry.name])
+                child_item.setFirstColumnSpanned(True)
                 child_item.setIcon(0, self.icon_provider.icon(QFileInfo(entry.path)))
                 child_item.setData(0, Qt.ItemDataRole.UserRole,
                                    {'path': os.path.normpath(entry.path), 'is_dir': entry.is_dir()})
@@ -590,7 +608,7 @@ class FileSystemListView(QWidget):
                 QMessageBox.critical(self, "Operation Failed", message)
         finally:
             QTimer.singleShot(200, lambda: setattr(self, '_is_programmatic_change', False))
-        
+
         if return_result:
             return success, message
 

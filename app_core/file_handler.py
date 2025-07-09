@@ -10,7 +10,7 @@ from PyQt6.QtGui import QGuiApplication, QDesktopServices
 from PyQt6.QtCore import QUrl, pyqtSignal, QObject
 from .settings_manager import settings_manager
 from utils.logger import log
-from utils.helpers import clean_git_conflict_markers # Import the new utility
+from utils.helpers import clean_git_conflict_markers
 
 
 class FileHandler(QObject):
@@ -36,7 +36,7 @@ class FileHandler(QObject):
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 original_content = f.read()
-            # FIX: Automatically clean git conflict markers when opening a file.
+            # Automatically clean git conflict markers when opening a file.
             content = clean_git_conflict_markers(original_content)
             if content != original_content:
                 log.info(f"Cleaned git conflict markers from {filepath} on load.")

@@ -16,7 +16,11 @@ class ScriptRunnerPlugin(QObject):
         super().__init__()
         self.api = puffin_api
         self.main_window = self.api.get_main_window()
-        self.output_panel = OutputPanel(self.main_window)
+        # THE FIX: Pass the theme_manager to the OutputPanel
+        self.output_panel = OutputPanel(
+            theme_manager=self.api.get_manager("theme"),
+            parent=self.main_window
+        )
         self.process = None
         self._current_task_info = {}
 
@@ -53,7 +57,6 @@ class ScriptRunnerPlugin(QObject):
                                                     'mdi.stop-circle-outline')
         self.stop_action.setEnabled(False)
 
-        # Add only the Python run/stop actions to the main toolbar for prominence
         py_action = self.run_actions['Run Python Script']
         self.api.add_toolbar_action(py_action)
         self.api.add_toolbar_action(self.stop_action)
@@ -68,10 +71,8 @@ class ScriptRunnerPlugin(QObject):
         active_ext = None
         if index != -1:
             if widget := self.main_window.tab_widget.widget(index):
-                if isinstance(widget, EditorWidget):
-                    if data := self.main_window.editor_tabs_data.get(widget):
-                        if filepath := data.get('filepath'):
-                            _, active_ext = os.path.splitext(filepath)
+                if hasattr(widget, 'filepath') and widget.filepath:
+                    _, active_ext = os.path.splitext(widget.filepath)
 
         for ext, config in self.RUN_CONFIG.items():
             action = self.run_actions.get(config['menu_text'])
@@ -91,10 +92,10 @@ class ScriptRunnerPlugin(QObject):
     def _get_current_filepath(self):
         from ui.editor_widget import EditorWidget
         editor = self.main_window.tab_widget.currentWidget()
-        if not isinstance(editor, EditorWidget):
+        if not hasattr(editor, 'filepath'):
             return None
 
-        filepath = self.main_window.editor_tabs_data.get(editor, {}).get('filepath')
+        filepath = editor.filepath
         if not filepath:
             self.api.show_message("info", "Save File", "Please save the file before running.")
             return None
@@ -103,13 +104,11 @@ class ScriptRunnerPlugin(QObject):
             self.main_window._action_save_file()
 
         return filepath
-        
+
     def run_specific_script(self, filepath: str):
-        """Runs a script from a given path, bypassing the active tab."""
         ext = os.path.splitext(filepath)[1].lower()
         for config_ext, config in self.RUN_CONFIG.items():
             if ext == config_ext:
-                # Call the handler with the specific filepath
                 config['handler'](filepath=filepath)
                 return
         self.api.show_message("warning", "Unsupported File Type", f"No run configuration for '{ext}' files.")
@@ -148,7 +147,7 @@ class ScriptRunnerPlugin(QObject):
 
         if "g++" in os.path.basename(compiler_path):
             args = [source_path, "-o", exe_path, "-std=c++17", "-Wall"]
-        else:  # cl.exe
+        else:
             args = [source_path, f"/Fe:{exe_path}", "/EHsc"]
 
         self._current_task_info = {'name': 'C++ Compilation', 'type': 'compile', 'runner_path': exe_path}
@@ -209,10 +208,10 @@ class ScriptRunnerPlugin(QObject):
             else:
                 self.output_panel.append_output(f"\n[{task_name}] Compilation failed.", is_error=True)
                 self._on_run_finished(exit_code)
-        else:  # Standard run or second step of compile-run
+        else:
             self.output_panel.append_output(f"\n[{task_name}] Finished with exit code {exit_code}.")
             runner_path = self._current_task_info.get('runner_path')
-            if runner_path and os.path.exists(runner_path) and not filepath.endswith('.py'):
+            if runner_path and os.path.exists(runner_path) and not runner_path.endswith(('.py', '.js')):
                 try:
                     os.remove(runner_path)
                 except OSError as e:
@@ -223,7 +222,6 @@ class ScriptRunnerPlugin(QObject):
         self.stop_action.setEnabled(False)
         self.process = None
         self._current_task_info = {}
-        # Re-evaluate which run button should be active
         self._on_tab_changed(self.main_window.tab_widget.currentIndex())
 
 

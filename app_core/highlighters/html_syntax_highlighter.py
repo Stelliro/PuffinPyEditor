@@ -1,15 +1,19 @@
-# PuffinPyEditor/plugins/basic_highlighters/html_syntax_highlighter.py
+# PuffinPyEditor/app_core/highlighters/html_syntax_highlighter.py
+from typing import TYPE_CHECKING
 from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 from PyQt6.QtCore import QRegularExpression
-from app_core.theme_manager import theme_manager
 from utils.logger import log
+
+if TYPE_CHECKING:
+    from app_core.theme_manager import ThemeManager
 
 
 class HtmlSyntaxHighlighter(QSyntaxHighlighter):
     """A syntax highlighter for HTML code."""
 
-    def __init__(self, parent_document):
+    def __init__(self, parent_document, theme_manager: "ThemeManager"):
         super().__init__(parent_document)
+        self.theme_manager = theme_manager
         self.rules = []
         self.multiline_comment_format = QTextCharFormat()
         self.initialize_formats_and_rules()
@@ -17,7 +21,7 @@ class HtmlSyntaxHighlighter(QSyntaxHighlighter):
 
     def initialize_formats_and_rules(self):
         formats = {}
-        colors = theme_manager.current_theme_data.get("colors", {})
+        colors = self.theme_manager.current_theme_data.get("colors", {})
 
         def get_color(key, fallback):
             return QColor(colors.get(f"syntax.{key}", fallback))
@@ -79,7 +83,7 @@ class HtmlSyntaxHighlighter(QSyntaxHighlighter):
                 self.setCurrentBlockState(1)
                 self.setFormat(0, len(text), self.multiline_comment_format)
                 return
-            
+
             # The comment concludes, we find our new starting point.
             length = end_match.capturedEnd()
             self.setFormat(0, length, self.multiline_comment_format)
@@ -95,12 +99,12 @@ class HtmlSyntaxHighlighter(QSyntaxHighlighter):
                 self.setCurrentBlockState(1)
                 self.setFormat(start_pos, len(text) - start_pos, self.multiline_comment_format)
                 return  # Our tale for this block is told.
-            
+
             # A complete, self-contained comment.
             length = end_match.capturedEnd() - start_pos
             self.setFormat(start_pos, length, self.multiline_comment_format)
             search_index = end_match.capturedEnd()
 
-    def rehighlight_document(self):
+    def rehighlight(self):
         self.initialize_formats_and_rules()
         super().rehighlight()

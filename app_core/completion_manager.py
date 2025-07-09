@@ -3,12 +3,15 @@ import os
 import sys
 import shutil
 import html
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 import jedi
 from .settings_manager import settings_manager
-from .theme_manager import theme_manager
 from utils.logger import log
+
+# Use this for type hinting to avoid circular dependencies if they ever arise
+if TYPE_CHECKING:
+    from .theme_manager import ThemeManager
 
 
 def find_python_interpreter_for_jedi() -> str:
@@ -200,8 +203,9 @@ class CompletionManager(QObject):
     _signature_requested = pyqtSignal(str, int, int, str)
     _project_path_changed = pyqtSignal(str)
 
-    def __init__(self, parent: Optional[QObject] = None):
+    def __init__(self, theme_manager: 'ThemeManager', parent: Optional[QObject] = None):
         super().__init__(parent)
+        self.theme_manager = theme_manager
         self.thread = QThread()
         self.worker = JediWorker()
         self.worker.moveToThread(self.thread)
@@ -245,7 +249,7 @@ class CompletionManager(QObject):
             return
 
         try:
-            colors = theme_manager.current_theme_data.get('colors', {})
+            colors = self.theme_manager.current_theme_data.get('colors', {})
             bg = colors.get('menu.background', '#2b2b2b')
             fg = colors.get('editor.foreground', '#a9b7c6')
             accent = colors.get('syntax.functionName', '#88c0d0')

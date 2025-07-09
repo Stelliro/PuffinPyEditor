@@ -14,7 +14,6 @@ class MarkdownPlugin:
     def __init__(self, puffin_api: PuffinPluginAPI):
         self.api = puffin_api
         self.main_window = self.api.get_main_window()
-        self.completion_manager = self.api.get_manager("completion")
         self.instances = {}  # Track open editor instances
 
         # Register our custom editor widget as the handler for .md files
@@ -26,7 +25,6 @@ class MarkdownPlugin:
         Callback to open a .md file in our custom MarkdownEditorWidget.
         It creates a new tab with the dual-pane editor or focuses an existing one.
         """
-        # If file is already open, just switch to its tab
         if filepath in self.instances:
             widget = self.instances[filepath]
             if widget:
@@ -35,7 +33,6 @@ class MarkdownPlugin:
                     self.main_window.tab_widget.setCurrentIndex(index)
                     return
 
-        # Remove placeholder if this is the first real tab
         if self.main_window.tab_widget.count() == 1:
             if current_widget := self.main_window.tab_widget.widget(0):
                 if current_widget.objectName() == "PlaceholderLabel":
@@ -43,22 +40,21 @@ class MarkdownPlugin:
 
         log.info(f"Markdown Editor: Creating new dual-pane view for '{filepath}'.")
 
+        # THE FIX: We pass the theme_manager to the widget's constructor.
         editor = MarkdownEditorWidget(
             puffin_api=self.api,
-            completion_manager=self.completion_manager,
+            theme_manager=self.api.get_manager("theme"),
             parent=self.main_window
         )
         editor.load_file(filepath)
         editor.content_changed.connect(lambda: self.main_window._on_content_changed(editor))
 
-        # Add the widget to a new tab
         tab_name = os.path.basename(filepath)
         index = self.main_window.tab_widget.addTab(editor, tab_name)
         self.main_window.tab_widget.setTabToolTip(index, filepath)
         self.main_window.tab_widget.setCurrentIndex(index)
         self.main_window.tab_widget.setTabsClosable(True)
 
-        # Store instance for tracking and to prevent duplicates
         self.instances[filepath] = editor
         editor.destroyed.connect(lambda: self.instances.pop(filepath, None))
 

@@ -36,18 +36,9 @@ class PuffinPluginAPI:
         return manager
 
     def add_dock_panel(self, widget: QWidget, title: str, area_str: str, icon_name: Optional[str] = None) -> Optional[QDockWidget]:
-        area_map = {
-            "left": Qt.DockWidgetArea.LeftDockWidgetArea,
-            "right": Qt.DockWidgetArea.RightDockWidgetArea,
-            "top": Qt.DockWidgetArea.TopDockWidgetArea,
-            "bottom": Qt.DockWidgetArea.BottomDockWidgetArea,
-        }
-        qt_area = area_map.get(area_str.lower())
-        if not qt_area:
-            self.log_error(f"Invalid dock area specified: '{area_str}'");
-            return None
-
-        return self._main_window.add_dock_panel(widget, title, qt_area, icon_name)
+        # THE FIX: This method now passes the string 'area_str' directly to the main window,
+        # which expects a string. The API layer no longer does the conversion, preventing the type mismatch.
+        return self._main_window.add_dock_panel(widget, title, area_str, icon_name)
 
     def get_plugin_instance(self, plugin_id: str) -> Optional[Any]:
         if plugin_manager := self.get_manager("plugin"):

@@ -4,7 +4,7 @@ PuffinPyEditor - Advanced Editor Widget
 (Version 8.7 - The Final Typo)
 """
 from __future__ import annotations
-from typing import Optional, Set, Dict, List, Tuple
+from typing import Optional, Set, Dict, List, Tuple, TYPE_CHECKING
 import re
 import os
 from math import cos, sin
@@ -12,14 +12,18 @@ from math import cos, sin
 from PyQt6.QtWidgets import (QWidget, QPlainTextEdit, QTextEdit, QHBoxLayout, QVBoxLayout, QSplitter)
 from PyQt6.QtGui import (QPainter, QColor, QFont, QPaintEvent, QTextFormat,
                          QTextBlockFormat, QPen, QTextCursor, QMouseEvent, QFontMetrics,
-                         QKeyEvent, QTextDocument, QKeySequence, QWheelEvent, QPolygonF)
+                         QKeyEvent, QTextDocument, QKeySequence, QWheelEvent, QPolygonF, QSyntaxHighlighter)
 from PyQt6.QtCore import (Qt, QSize, QRect, QRectF, QPointF, QEvent, pyqtSignal,
                           QObject)
 import qtawesome as qta
 from app_core.settings_manager import settings_manager
-from app_core.theme_manager import theme_manager
 from .widgets.find_panel import FindPanel
 from utils.logger import log
+
+if TYPE_CHECKING:
+    from app_core.theme_manager import ThemeManager
+    from app_core.completion_manager import CompletionManager
+    from app_core.puffin_api import PuffinPluginAPI
 
 
 class HighlightManager(QObject):
@@ -109,7 +113,7 @@ class MiniMapWidget(QWidget):
         v_scroll = self.editor.verticalScrollBar()
         scroll_proportion = v_scroll.value() / v_scroll.maximum() if v_scroll.maximum() > 0 else 0
         scroll_offset = -(
-                    total_content_height - self.height()) * scroll_proportion if total_content_height > self.height() else 0
+                total_content_height - self.height()) * scroll_proportion if total_content_height > self.height() else 0
         painter.setPen(QColor(colors.get('editor.foreground', '#c0caf5')))
         for i in range(doc.blockCount()):
             block = doc.findBlockByNumber(i)
@@ -158,9 +162,12 @@ class CodeOutlineMinimap(MiniMapWidget):
             (re.compile(r"^\s*(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s*)?\("), 'def', 1),
         ],
         'csharp': [
-            (re.compile(r"^\s*(?:public|private|protected|internal)?\s*(?:sealed|abstract)?\s*class\s+(\w+)"), 'class', 1),
+            (re.compile(r"^\s*(?:public|private|protected|internal)?\s*(?:sealed|abstract)?\s*class\s+(\w+)"), 'class',
+             1),
             (re.compile(r"^\s*(?:public|private|protected|internal)?\s*struct\s+(\w+)"), 'class', 1),
-            (re.compile(r"^\s*(?:public|private|protected|internal)?\s*(?:static|virtual|override|async|unsafe)?\s*[\w<>\[\],]+\s+([\w]+)\s*\("), 'def', 1),
+            (re.compile(
+                r"^\s*(?:public|private|protected|internal)?\s*(?:static|virtual|override|async|unsafe)?\s*[\w<>\[\],]+\s+([\w]+)\s*\("),
+             'def', 1),
         ],
         'cpp': [
             (re.compile(r"^\s*class\s+(\w+)"), 'class', 1),
@@ -490,15 +497,17 @@ class EditorWidget(QWidget):
     cursor_position_display_updated = pyqtSignal(int, int)
     status_message_requested = pyqtSignal(str, int)
 
-    def __init__(self, puffin_api, completion_manager, highlight_manager: HighlightManager, parent=None):
+    def __init__(self, puffin_api: 'PuffinPluginAPI', completion_manager: 'CompletionManager',
+                 highlight_manager: HighlightManager, theme_manager: 'ThemeManager', parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.puffin_api = puffin_api
+        self.completion_manager = completion_manager
         self.theme_manager = theme_manager
         self.settings = settings_manager
         self.highlight_manager = highlight_manager
         self.filepath: Optional[str] = None
         self.highlighter: Optional[QSyntaxHighlighter] = None
-        self.find_panel = FindPanel(self)
+        self.find_panel = FindPanel(self.theme_manager, self)
         self.find_panel.hide()
         self.text_area = CodeEditor(self)
         self.gutter_widget = GutterWidget(self.text_area)
@@ -519,24 +528,23 @@ class EditorWidget(QWidget):
 
     def _setup_layout(self):
         self.content_splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        
+
         editor_area_widget = QWidget()
         editor_layout = QHBoxLayout(editor_area_widget)
         editor_layout.setContentsMargins(0, 0, 0, 0)
         editor_layout.setSpacing(0)
         editor_layout.addWidget(self.gutter_widget)
         editor_layout.addWidget(self.text_area, 1)
-        
+
         self.content_splitter.addWidget(editor_area_widget)
         self.content_splitter.addWidget(self.minimap_widget)
         self.content_splitter.setSizes([800, 150])
         self.content_splitter.setHandleWidth(4)
-        
+
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
         self.main_layout.addWidget(self.find_panel)
-        # THE FIX: Give the content_splitter a stretch factor so it takes priority
         self.main_layout.addWidget(self.content_splitter, 1)
 
     def _connect_signals(self):
@@ -623,7 +631,7 @@ class EditorWidget(QWidget):
         if self.highlighter:
             self.highlighter.setDocument(None)
         if highlighter_class:
-            self.highlighter = highlighter_class(self.text_area.document())
+            self.highlighter = highlighter_class(self.text_area.document(), self.theme_manager)
 
     def toggle_find_panel(self):
         if self.find_panel.isVisible():

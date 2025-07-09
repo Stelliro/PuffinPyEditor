@@ -5,7 +5,7 @@ import os
 
 # --- Core Imports ---
 from PyQt6.QtWidgets import QApplication
-from app_core.theme_manager import theme_manager
+from app_core.theme_manager import ThemeManager
 from app_core.file_handler import FileHandler
 from utils.logger import log
 
@@ -40,6 +40,8 @@ def main():
     app.setApplicationName("PuffinPyEditor")
     app.setOrganizationName("PuffinPyEditorProject")
 
+    # Instantiate the managers here, after QApplication
+    theme_manager = ThemeManager()
     theme_manager.apply_theme_to_app(app)
     file_handler = FileHandler()
 
@@ -59,4 +61,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

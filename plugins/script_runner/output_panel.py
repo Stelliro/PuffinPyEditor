@@ -1,14 +1,17 @@
-# PuffinPyEditor/plugins/pythong_tools/output_panel.py
+# PuffinPyEditor/plugins/script_runner/output_panel.py
+from typing import TYPE_CHECKING
 from PyQt6.QtWidgets import QDockWidget, QTextEdit, QVBoxLayout, QWidget, QPushButton, QHBoxLayout
 from PyQt6.QtGui import QFont, QColor
 from PyQt6.QtCore import Qt
 from app_core.settings_manager import settings_manager
-from app_core.theme_manager import theme_manager
 
+if TYPE_CHECKING:
+    from app_core.theme_manager import ThemeManager
 
 class OutputPanel(QDockWidget):
-    def __init__(self, parent=None):
+    def __init__(self, theme_manager: "ThemeManager", parent=None):
         super().__init__("Output", parent)
+        self.theme_manager = theme_manager
         self.setObjectName("OutputPanelDock")
         self.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea |
                              Qt.DockWidgetArea.RightDockWidgetArea)
@@ -36,7 +39,7 @@ class OutputPanel(QDockWidget):
     def append_output(self, text: str, is_error: bool = False):
         original_text_color = self.output_text_edit.textColor()
         if is_error:
-            colors = theme_manager.current_theme_data.get("colors", {})
+            colors = self.theme_manager.current_theme_data.get("colors", {})
             error_color_hex = colors.get("syntax.comment", "#FF4444")
             error_color = QColor(error_color_hex if error_color_hex else "#FF0000")
             self.output_text_edit.setTextColor(error_color)
@@ -56,7 +59,7 @@ class OutputPanel(QDockWidget):
         font = QFont(font_family, font_size)
         self.output_text_edit.setFont(font)
 
-        colors = theme_manager.current_theme_data.get("colors", {})
+        colors = self.theme_manager.current_theme_data.get("colors", {})
         bg_color = colors.get("editor.background", "#1e1e1e")
         fg_color = colors.get("editor.foreground", "#d4d4d4")
         self.output_text_edit.setStyleSheet(f"background-color: {bg_color}; "

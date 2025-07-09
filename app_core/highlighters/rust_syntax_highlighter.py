@@ -1,16 +1,19 @@
-# PuffinPyEditor/plugins/basic_highlighters/rust_syntax_highlighter.py
-from typing import Dict, List, Tuple
+# PuffinPyEditor/app_core/highlighters/rust_syntax_highlighter.py
+from typing import Dict, List, Tuple, TYPE_CHECKING
 from PyQt6.QtGui import QSyntaxHighlighter, QTextCharFormat, QColor, QFont
 from PyQt6.QtCore import QRegularExpression
-from app_core.theme_manager import theme_manager
 from utils.logger import log
+
+if TYPE_CHECKING:
+    from app_core.theme_manager import ThemeManager
 
 
 class RustSyntaxHighlighter(QSyntaxHighlighter):
     """A syntax highlighter for Rust code."""
 
-    def __init__(self, parent_document):
+    def __init__(self, parent_document, theme_manager: "ThemeManager"):
         super().__init__(parent_document)
+        self.theme_manager = theme_manager
         self.highlighting_rules: List[Tuple[QRegularExpression, QTextCharFormat]] = []
         self.multiline_comment_format = QTextCharFormat()
         self.initialize_formats_and_rules()
@@ -19,7 +22,7 @@ class RustSyntaxHighlighter(QSyntaxHighlighter):
     def initialize_formats_and_rules(self):
         """Initializes all text formats and regular expression rules based on the theme."""
         self.formats: Dict[str, QTextCharFormat] = {}
-        colors = theme_manager.current_theme_data.get("colors", {})
+        colors = self.theme_manager.current_theme_data.get("colors", {})
 
         def get_color(key: str, fallback: str) -> QColor:
             return QColor(colors.get(f"syntax.{key}", fallback))
@@ -89,7 +92,7 @@ class RustSyntaxHighlighter(QSyntaxHighlighter):
                     fmt(match)
                 else:
                     self.setFormat(match.capturedStart(), match.capturedLength(), fmt)
-        
+
         self.setCurrentBlockState(0)
         search_index = 0
 
@@ -101,7 +104,7 @@ class RustSyntaxHighlighter(QSyntaxHighlighter):
                 self.setCurrentBlockState(1)
                 self.setFormat(0, len(text), self.multiline_comment_format)
                 return
-            
+
             # The comment concludes, we find our new starting point.
             length = end_match.capturedEnd()
             self.setFormat(0, length, self.multiline_comment_format)
@@ -117,12 +120,12 @@ class RustSyntaxHighlighter(QSyntaxHighlighter):
                 self.setCurrentBlockState(1)
                 self.setFormat(start_pos, len(text) - start_pos, self.multiline_comment_format)
                 return  # Our tale for this block is told.
-            
+
             # A complete, self-contained comment.
             length = end_match.capturedEnd() - start_pos
             self.setFormat(start_pos, length, self.multiline_comment_format)
             search_index = end_match.capturedEnd()
 
-    def rehighlight_document(self):
+    def rehighlight(self):
         self.initialize_formats_and_rules()
         super().rehighlight()

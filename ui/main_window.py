@@ -2,7 +2,6 @@
 import os, sys, re
 from functools import partial
 from typing import Optional
-# MODIFIED: Added QDragEnterEvent and QDropEvent to the import list
 from PyQt6.QtGui import (QKeySequence, QAction, QCloseEvent, QDesktopServices, QIcon, QActionGroup, QDragEnterEvent,
                          QDropEvent)
 from PyQt6.QtWidgets import (QMessageBox, QMenu, QWidget, QVBoxLayout, QHBoxLayout, QMainWindow, QStatusBar, QTabWidget, \
@@ -13,7 +12,6 @@ import qtawesome as qta
 from utils.logger import log
 from utils import versioning
 from app_core.file_handler import FileHandler
-from app_core.theme_manager import theme_manager
 from app_core.settings_manager import settings_manager
 from app_core.project_manager import ProjectManager
 from app_core.linter_manager import LinterManager
@@ -125,7 +123,7 @@ class MainWindow(QMainWindow):
         self.settings = settings_manager
         self.project_manager = ProjectManager()
         self.highlight_manager = HighlightManager()
-        self.completion_manager = CompletionManager(self)
+        self.completion_manager = CompletionManager(self.theme_manager, self)
         self.github_manager = GitHubManager(self)
         self.git_manager = SourceControlManager(self)
         self.linter_manager = LinterManager(self)
@@ -150,7 +148,7 @@ class MainWindow(QMainWindow):
             return
         try:
             self.tab_widget.setTabsClosable(True)
-            editor = EditorWidget(self.puffin_api, self.completion_manager, self.highlight_manager, self)
+            editor = EditorWidget(self.puffin_api, self.completion_manager, self.highlight_manager, self.theme_manager, self)
             if hc := self.puffin_api.highlighter_map.get(os.path.splitext(filepath or "")[1].lower()):
                 editor.set_highlighter(hc)
             editor.set_filepath(filepath);
@@ -209,7 +207,7 @@ class MainWindow(QMainWindow):
 
     def _integrate_linter_ui(self):
         self.problems_panel = ProblemsPanel(self)
-        self.add_dock_panel(self.problems_panel, "Problems", Qt.DockWidgetArea.BottomDockWidgetArea, "mdi.bug-outline")
+        self.add_dock_panel(self.problems_panel, "Problems", "bottom", "mdi.bug-outline")
         self.linter_manager.lint_results_ready.connect(self._update_problems_panel)
         self.linter_manager.error_occurred.connect(
             lambda err: self.problems_panel.show_info_message(f"Linter Error: {err}"))
@@ -219,7 +217,7 @@ class MainWindow(QMainWindow):
         self.source_control_panel = ProjectSourceControlPanel(
             self.project_manager, self.git_manager, self.github_manager, self.puffin_api, self
         )
-        self.add_dock_panel(self.source_control_panel, "Source Control", Qt.DockWidgetArea.BottomDockWidgetArea,
+        self.add_dock_panel(self.source_control_panel, "Source Control", "bottom",
                             "mdi.git")
 
     def _integrate_global_drag_drop(self):
@@ -252,6 +250,7 @@ class MainWindow(QMainWindow):
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.tab_widget = DraggableTabWidget(self)
+        self.tab_widget.setObjectName("MainTabWidget")
         btn = QToolButton()
         btn.setIcon(qta.icon('mdi.plus'))
         btn.setAutoRaise(True)
@@ -349,9 +348,6 @@ class MainWindow(QMainWindow):
         self.theme_changed_signal.emit(theme_id)
         for act in self.actions.values():
             if ico := act.data(): act.setIcon(qta.icon(ico))
-        c = self.theme_manager.current_theme_data.get('colors', {})
-        self.tab_widget.setStyleSheet(
-            f"QTabBar::tab:selected {{ background: {c.get('editor.background', '#1e1e1e')}; color: {c.get('tab.activeForeground', '#ffffff')}; border-top: 2px solid {c.get('tab.activeBorderTop', c.get('tab.activeBorder', '#e06c75'))}; border-bottom-color: {c.get('editor.background', '#1e1e1e')}; }} QTabBar::tab:!selected {{ margin-top: 2px; border-bottom: none; }} QTabWidget::pane {{ border: none; }}")
         self._rebuild_theme_menu();
         [w.update_theme() for i in range(self.tab_widget.count()) if
          hasattr(w := self.tab_widget.widget(i), 'update_theme')]
@@ -368,22 +364,40 @@ class MainWindow(QMainWindow):
             group.addAction(act);
             self.theme_menu.addAction(act)
 
-    def add_dock_panel(self, panel, title, area, icon_name=None):
+    def add_dock_panel(self, panel, title, area_str: str, icon_name=None):
+        area_map = {
+            "left": Qt.DockWidgetArea.LeftDockWidgetArea,
+            "right": Qt.DockWidgetArea.RightDockWidgetArea,
+            "top": Qt.DockWidgetArea.TopDockWidgetArea,
+            "bottom": Qt.DockWidgetArea.BottomDockWidgetArea,
+        }
+        area = area_map.get(area_str.lower(), Qt.DockWidgetArea.BottomDockWidgetArea)
+
         if area == Qt.DockWidgetArea.BottomDockWidgetArea:
-            if not self._bottom_tab_widget: self._bottom_dock_widget = QDockWidget("Info Panels",
-                                                                                   self); self._bottom_dock_widget.setObjectName(
-                "SharedBottomDock"); self._bottom_tab_widget = QTabWidget(); self._bottom_tab_widget.setDocumentMode(
-                True); self._bottom_dock_widget.setWidget(self._bottom_tab_widget); self.addDockWidget(area,
-                                                                                                       self._bottom_dock_widget)
-            if self.view_menu: self.view_menu.addSeparator(); self.view_menu.addAction(
-                self._bottom_dock_widget.toggleViewAction())
-            self._bottom_tab_widget.addTab(panel, qta.icon(icon_name) if icon_name else QIcon(), title);
+            if not self._bottom_tab_widget:
+                self._bottom_dock_widget = QDockWidget("Info Panels", self)
+                self._bottom_dock_widget.setObjectName("SharedBottomDock")
+                self._bottom_tab_widget = QTabWidget()
+                self._bottom_tab_widget.setObjectName("InfoPanelTabBar")
+                self._bottom_tab_widget.setDocumentMode(True)
+                self._bottom_dock_widget.setWidget(self._bottom_tab_widget)
+                self.addDockWidget(area, self._bottom_dock_widget)
+                if self.view_menu:
+                    self.view_menu.addSeparator()
+                    self.view_menu.addAction(self._bottom_dock_widget.toggleViewAction())
+
+            icon = qta.icon(icon_name) if icon_name else QIcon()
+            self._bottom_tab_widget.addTab(panel, icon, title)
             return self._bottom_dock_widget
+
         dock = QDockWidget(title, self);
         dock.setWidget(panel)
         if icon_name: dock.setWindowIcon(qta.icon(icon_name))
         self.addDockWidget(area, dock)
-        if self.view_menu: self.view_menu.addSeparator(); self.view_menu.addAction(dock.toggleViewAction()); return dock
+        if self.view_menu:
+            self.view_menu.addSeparator()
+            self.view_menu.addAction(dock.toggleViewAction())
+        return dock
 
     def _action_open_file(self, fp=None, content=None):
         if not (isinstance(fp, str) and fp): return
@@ -585,7 +599,7 @@ class MainWindow(QMainWindow):
 
     def _action_open_preferences(self):
         if not self.preferences_dialog or not self.preferences_dialog.isVisible():
-            self.preferences_dialog = PreferencesDialog(self.git_manager, self.github_manager, self.plugin_manager,
+            self.preferences_dialog = PreferencesDialog(self.theme_manager, self.git_manager, self.github_manager, self.plugin_manager,
                                                         self.puffin_api, self)
             self.preferences_dialog.settings_changed_for_editor_refresh.connect(self._on_editor_settings_changed);
             self.preferences_dialog.theme_changed_signal.connect(self._on_theme_selected)

@@ -1,5 +1,6 @@
 # PuffinPyEditor/plugins/ai_export_viewer/ai_export_viewer_widget.py
 import os
+from typing import TYPE_CHECKING
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
     QTextEdit, QPushButton, QMessageBox, QSplitter, QFrame
@@ -10,17 +11,19 @@ from markdown import markdown
 import qtawesome as qta
 from utils.helpers import get_base_path
 from utils.logger import log
-from app_core.theme_manager import theme_manager
 from app_core.settings_manager import settings_manager
 
+if TYPE_CHECKING:
+    from app_core.theme_manager import ThemeManager
 
 class AIExportViewerWidget(QWidget):
     """
     A widget that displays a list of past AI exports and their content,
     designed to be embedded in a tab.
     """
-    def __init__(self, parent=None):
+    def __init__(self, theme_manager: "ThemeManager", parent=None):
         super().__init__(parent)
+        self.theme_manager = theme_manager
         self.export_dir = os.path.join(get_base_path(), "ai_exports")
         self._ensure_export_dir_exists()
 
@@ -161,7 +164,7 @@ class AIExportViewerWidget(QWidget):
 
     def update_theme(self):
         """Applies colors and fonts from the current theme."""
-        colors = theme_manager.current_theme_data.get('colors', {})
+        colors = self.theme_manager.current_theme_data.get('colors', {})
         font_family = settings_manager.get("font_family", "Consolas")
         font_size = settings_manager.get("font_size", 11)
 
