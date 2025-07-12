@@ -7,6 +7,7 @@ and extend language support.
 from .highlighters.python_syntax_highlighter import PythonSyntaxHighlighter
 from .highlighters.json_syntax_highlighter import JsonSyntaxHighlighter
 from .highlighters.html_syntax_highlighter import HtmlSyntaxHighlighter
+from .highlighters.css_syntax_highlighter import CssSyntaxHighlighter
 from .highlighters.cpp_syntax_highlighter import CppSyntaxHighlighter
 from .highlighters.csharp_syntax_highlighter import CSharpSyntaxHighlighter
 from .highlighters.javascript_syntax_highlighter import JavaScriptSyntaxHighlighter
@@ -16,6 +17,7 @@ __all__ = [
     "PythonSyntaxHighlighter",
     "JsonSyntaxHighlighter",
     "HtmlSyntaxHighlighter",
+    "CssSyntaxHighlighter",
     "CppSyntaxHighlighter",
     "CSharpSyntaxHighlighter",
     "JavaScriptSyntaxHighlighter",

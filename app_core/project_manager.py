@@ -75,16 +75,21 @@ class ProjectManager(QObject):
         """Closes a project and updates the active project if necessary."""
         norm_path = os.path.normpath(path)
         if norm_path in self._open_projects:
+            was_active = (self.get_active_project_path() == norm_path)
+            
             self._open_projects.remove(norm_path)
             log.info(f"Project closed: {norm_path}")
 
             # If the closed project was the active one, pick a new active one
-            if self.get_active_project_path() == norm_path:
-                new_active = self._open_projects[0] if self._open_projects else None
-                self.set_active_project(new_active)
+            if was_active:
+                new_active_path = self._open_projects[0] if self._open_projects else None
+                # Directly set the internal variable. We will emit the signal once at the end.
+                if self._active_project_path != new_active_path:
+                    self._active_project_path = new_active_path
+                    log.info(f"Active project changed to: {new_active_path}")
             
-            # Persist the change
             self.save_session()
+            # A single, definitive signal emission to trigger the UI refresh.
             self.projects_changed.emit()
 
     def move_project(self, path_to_move: str, direction: str):
@@ -123,8 +128,21 @@ class ProjectManager(QObject):
         return self._open_projects
 
     def set_active_project(self, path: Optional[str]):
-        """Sets the currently active project."""
+        """
+        Sets the currently active project. The project MUST already be in the open list.
+        """
         norm_path = os.path.normpath(path) if path else None
+        
+        # THE FIX: This guard clause prevents a closed project from being
+        # re-activated by a UI signal. A project must be in the open list
+        # to become the active project.
+        if norm_path and norm_path not in self._open_projects:
+            log.warning(
+                f"Attempted to set active project to '{norm_path}', "
+                "but it's not in the open projects list. Ignoring."
+            )
+            return
+
         if self._active_project_path != norm_path:
             self._active_project_path = norm_path
             log.info(f"Active project set to: {norm_path}")

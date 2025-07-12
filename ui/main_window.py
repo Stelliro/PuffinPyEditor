@@ -5,12 +5,12 @@ from typing import Optional
 from PyQt6.QtGui import (QKeySequence, QAction, QCloseEvent, QDesktopServices, QIcon, QActionGroup, QDragEnterEvent,
                          QDropEvent)
 from PyQt6.QtWidgets import (QMessageBox, QMenu, QWidget, QVBoxLayout, QHBoxLayout, QMainWindow, QStatusBar, QTabWidget, \
-                             QLabel, QToolButton, QToolBar, QSizePolicy, QApplication, QFileDialog, QDockWidget)
+                             QLabel, QToolButton, QToolBar, QSizePolicy, QApplication, QFileDialog, QDockWidget, QComboBox)
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QUrl, QEvent
 
 import qtawesome as qta
 from utils.logger import log
-from utils import versioning
+from utils import versioning, helpers
 from app_core.file_handler import FileHandler
 from app_core.settings_manager import settings_manager
 from app_core.project_manager import ProjectManager
@@ -29,7 +29,7 @@ from .widgets.source_control_panel import ProjectSourceControlPanel
 from .editor_widget import EditorWidget, HighlightManager
 from app_core.syntax_highlighters import (
     PythonSyntaxHighlighter, JsonSyntaxHighlighter, HtmlSyntaxHighlighter,
-    CppSyntaxHighlighter, CSharpSyntaxHighlighter, JavaScriptSyntaxHighlighter,
+    CssSyntaxHighlighter, CppSyntaxHighlighter, CSharpSyntaxHighlighter, JavaScriptSyntaxHighlighter,
     RustSyntaxHighlighter
 )
 
@@ -50,6 +50,17 @@ class MainWindow(QMainWindow):
         self._initialize_managers()
         self.puffin_api = PuffinPluginAPI(self)
         self.puffin_api.highlight_manager = self.highlight_manager
+
+        # --- NEW: Encoding Map for the UI ---
+        self.encoding_map = {
+            "UTF-8": "utf-8",
+            "UTF-8-SIG": "utf-8-sig",
+            "UTF-16 LE": "utf-16le",
+            "UTF-16 BE": "utf-16be",
+            "Latin-1": "latin-1",
+            "Windows-1252": "cp1252"
+        }
+        self.reverse_encoding_map = {v: k for k, v in self.encoding_map.items()}
 
         self._register_built_in_highlighters()
 
@@ -105,7 +116,7 @@ class MainWindow(QMainWindow):
             '.pyw': PythonSyntaxHighlighter,
             '.json': JsonSyntaxHighlighter,
             '.html': HtmlSyntaxHighlighter,
-            '.css': None,  # Placeholder for a future CSS highlighter
+            '.css': CssSyntaxHighlighter,
             '.js': JavaScriptSyntaxHighlighter,
             '.rs': RustSyntaxHighlighter,
             '.c': CppSyntaxHighlighter,
@@ -136,8 +147,12 @@ class MainWindow(QMainWindow):
         self.lint_timer.setInterval(1500)
         self.auto_save_timer = QTimer(self);
         self.auto_save_timer.setSingleShot(True)
+        # --- NEW: Timer for saving drafts ---
+        self.draft_save_timer = QTimer(self)
+        self.draft_save_timer.setSingleShot(True)
+        self.draft_save_timer.setInterval(2000) # Save draft 2s after user stops typing
 
-    def _add_new_tab(self, filepath=None, content="", is_placeholder=False):
+    def _add_new_tab(self, filepath=None, content="", encoding='utf-8', is_placeholder=False):
         if not is_placeholder and self.tab_widget.count() == 1 and isinstance(self.tab_widget.widget(0), QLabel):
             self.tab_widget.removeTab(0)
         if is_placeholder:
@@ -160,7 +175,7 @@ class MainWindow(QMainWindow):
             if not filepath: self.untitled_file_counter += 1
             idx = self.tab_widget.addTab(editor, name)
             self.tab_widget.setTabToolTip(idx, filepath or f"Unsaved {name}")
-            self.editor_tabs_data[editor] = {'filepath': filepath, 'original_hash': hash(content)}
+            self.editor_tabs_data[editor] = {'filepath': filepath, 'original_hash': hash(content), 'encoding': encoding}
             self.tab_widget.setCurrentWidget(editor)
             editor.text_area.setFocus()
         except Exception as e:
@@ -320,6 +335,17 @@ class MainWindow(QMainWindow):
         sp = QWidget();
         sp.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred);
         tb.addWidget(sp);
+        
+        # --- NEW Encoding Dropdown ---
+        self.encoding_toolbar_label = QLabel(" Encoding: ")
+        self.encoding_combo = QComboBox()
+        self.encoding_combo.setToolTip("Change file encoding and re-save")
+        for display_name, actual_name in self.encoding_map.items():
+            self.encoding_combo.addItem(display_name, actual_name)
+        
+        tb.addWidget(self.encoding_toolbar_label)
+        tb.addWidget(self.encoding_combo)
+        tb.addSeparator()
 
         tb.addAction(self.actions["find_replace"])
         tb.addAction(self.actions["preferences"])
@@ -330,9 +356,10 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.tab_widget)
 
     def _create_statusbar(self):
-        self.setStatusBar(QStatusBar(self));
-        self.cursor_label = QLabel(
-            " Ln 1, Col 1 ");
+        self.setStatusBar(QStatusBar(self))
+        self.encoding_label = QLabel(" UTF-8 ")
+        self.cursor_label = QLabel(" Ln 1, Col 1 ")
+        self.statusBar().addPermanentWidget(self.encoding_label)
         self.statusBar().addPermanentWidget(self.cursor_label)
 
     def _connect_signals(self):
@@ -342,6 +369,9 @@ class MainWindow(QMainWindow):
         self.completion_manager.definition_found.connect(self._goto_definition_result);
         self.auto_save_timer.timeout.connect(self._auto_save_current_tab)
         self.file_handler.recent_files_changed.connect(self._update_recent_files_menu)
+        self.encoding_combo.activated.connect(self._on_encoding_changed_from_dropdown)
+        # --- NEW: Connect draft save timer ---
+        self.draft_save_timer.timeout.connect(self._save_current_draft)
 
     def _apply_theme_and_icons(self, theme_id):
         self.theme_manager.set_theme(theme_id, QApplication.instance());
@@ -399,7 +429,7 @@ class MainWindow(QMainWindow):
             self.view_menu.addAction(dock.toggleViewAction())
         return dock
 
-    def _action_open_file(self, fp=None, content=None):
+    def _action_open_file(self, fp=None, content=None, encoding=None):
         if not (isinstance(fp, str) and fp): return
         np = os.path.normpath(fp)
         for i in range(self.tab_widget.count()):
@@ -407,22 +437,46 @@ class MainWindow(QMainWindow):
                     'filepath') == np: self.tab_widget.setCurrentIndex(i); return
         if h := self.file_open_handlers.get(os.path.splitext(np)[1].lower()): h(
             np); self.file_handler._add_to_recent_files(np); return
+        
+        # --- MODIFIED: Draft Checking Logic ---
+        draft_path = helpers.get_draft_path(np)
+        use_draft = False
+        if os.path.exists(draft_path) and os.path.getmtime(draft_path) > os.path.getmtime(np):
+            reply = QMessageBox.question(
+                self, "Unsaved Changes Found",
+                f"It looks like you have unsaved changes for '{os.path.basename(np)}' from a previous session.\n\n"
+                "Do you want to restore them?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                use_draft = True
+            else:
+                # User chose not to restore, so we delete the draft
+                os.remove(draft_path)
+
+        if use_draft:
+            log.info(f"Restoring unsaved changes from draft for: {np}")
+            content, encoding = self.file_handler._read_with_encoding_detection(draft_path)
+            if content is None:
+                QMessageBox.warning(self, "Draft Read Error", "Could not read the draft file. Opening original.")
+                content, encoding = self.file_handler._read_with_encoding_detection(np)
+        elif content is None:
+            content, encoding = self.file_handler._read_with_encoding_detection(np)
+
         if content is None:
-            try:
-                with open(np, 'r', encoding='utf-8', errors='replace') as f:
-                    content = f.read()
-            except Exception as e:
-                self.puffin_api.show_message("critical", "Error Opening File", f"Could not read file: {e}");
-                return
-        self._add_new_tab(np, content);
+            self.puffin_api.show_message("critical", "Error Opening File", f"Could not read file: {np}")
+            return
+        
+        self._add_new_tab(np, content, encoding or 'utf-8')
         self.file_handler._add_to_recent_files(np)
 
     def _action_open_file_dialog(self):
-        fp, content, err = self.file_handler.open_file_dialog()
+        fp, content, encoding, err = self.file_handler.open_file_dialog()
         if err:
             QMessageBox.critical(self, "Error Opening File", err)
         elif fp:
-            self._action_open_file(fp, content)
+            self._action_open_file(fp, content, encoding)
 
     def _action_open_folder(self, path=None):
         if not path or not isinstance(path, str): path = QFileDialog.getExistingDirectory(self, "Open Folder",
@@ -441,16 +495,34 @@ class MainWindow(QMainWindow):
         self._apply_theme_and_icons(theme_id)
 
     def _on_tab_changed(self, index):
-        self._update_window_title();
-        widget, is_editor = self.tab_widget.widget(index) if index != -1 else None, False
+        self._update_window_title()
+        widget = self.tab_widget.widget(index) if index != -1 else None
+        is_editor = False
+        
+        # --- UPDATED: Auto-detect and update encoding dropdown ---
+        self.encoding_combo.blockSignals(True)
         if isinstance(widget, EditorWidget):
-            is_editor, (line, col) = True, widget.get_cursor_position();
+            is_editor, (line, col) = True, widget.get_cursor_position()
             self.cursor_label.setText(f" Ln {line}, Col {col} ")
+            data = self.editor_tabs_data.get(widget, {})
+            encoding = data.get('encoding', 'utf-8')
+            encoding_display_name = self.reverse_encoding_map.get(encoding, "UTF-8")
+            self.encoding_label.setText(f" {encoding_display_name} ")
+            
+            # Update the toolbar dropdown
+            if (idx := self.encoding_combo.findData(encoding)) != -1:
+                self.encoding_combo.setCurrentIndex(idx)
+            
+            self.encoding_combo.setEnabled(bool(data.get('filepath')))
         else:
             self.cursor_label.setText("")
+            self.encoding_label.setText("")
+            self.encoding_combo.setEnabled(False)
             for i in range(self.tab_widget.count()):
                 if (w := self.tab_widget.widget(i)) and isinstance(w,
                                                                    EditorWidget) and w.find_panel.isVisible(): w.hide_find_panel()
+        
+        self.encoding_combo.blockSignals(False)
         self.actions["find_replace"].setEnabled(is_editor)
 
     def _is_editor_modified(self, ed):
@@ -469,6 +541,10 @@ class MainWindow(QMainWindow):
         self._update_window_title()
         if self.settings.get("auto_save_enabled"): self.auto_save_timer.start(
             self.settings.get("auto_save_delay_seconds", 3) * 1000)
+        
+        # --- NEW: Trigger draft save on content change ---
+        if mod:
+            self.draft_save_timer.start()
 
     def _update_window_title(self):
         proj = os.path.basename(self.project_manager.get_active_project_path() or "");
@@ -483,21 +559,31 @@ class MainWindow(QMainWindow):
         editor = editor_widget or self.tab_widget.currentWidget()
         if not (isinstance(editor, EditorWidget) and (data := self.editor_tabs_data.get(editor))): return None
 
-        if not self._is_editor_modified(editor) and not save_as and data['filepath']:
-            self.statusBar().showMessage("File is already saved.", 2000)
-            return data['filepath']
-
         content = editor.get_text()
-        if new_fp := self.file_handler.save_file_content(data['filepath'], content, save_as):
+        encoding = data.get('encoding', 'utf-8')
+        
+        # --- MODIFIED: Clear draft on successful save ---
+        new_fp, new_encoding = self.file_handler.save_file_content(data['filepath'], content, save_as, encoding=encoding)
+        
+        if new_fp:
+            # Delete the draft file since changes are now permanent
+            draft_path = helpers.get_draft_path(new_fp)
+            if os.path.exists(draft_path):
+                os.remove(draft_path)
+                log.info(f"Removed draft file for saved file: {new_fp}")
+
             self.file_handler._add_to_recent_files(new_fp)
-            data.update({'filepath': new_fp, 'original_hash': hash(content)});
+            data.update({'filepath': new_fp, 'original_hash': hash(content), 'encoding': new_encoding})
             editor.set_filepath(new_fp)
             if (idx := self.tab_widget.indexOf(editor)) != -1:
                 self.tab_widget.setTabText(idx, os.path.basename(new_fp));
                 self.tab_widget.setTabToolTip(idx, new_fp)
             self.statusBar().showMessage(f"File saved: {os.path.basename(new_fp)}", 3000);
             self._on_content_changed(editor);
+            # Update status bar immediately after saving
+            self._on_tab_changed(self.tab_widget.currentIndex())
             return new_fp
+        
         self.statusBar().showMessage("Save cancelled.", 2000)
         return None
 
@@ -530,37 +616,12 @@ class MainWindow(QMainWindow):
                 self._add_new_tab(is_placeholder=True)
 
     def _close_widget_safely(self, widget, event):
-        if not isinstance(widget, (EditorWidget, QWidget)) or (
-                isinstance(widget, QLabel) and widget.objectName() == "PlaceholderLabel"):
-            event.accept()
-            return
-
-        is_editor_widget = isinstance(widget, EditorWidget)
-
-        if is_editor_widget and self._is_editor_modified(widget):
-            tab_name = ""
-            # Handle both attached and detached (floating) tabs
-            widget_data = self.editor_tabs_data.get(widget)
-            if widget_data and (fp := widget_data.get('filepath')):
-                tab_name = os.path.basename(fp)
-            elif (idx := self.tab_widget.indexOf(widget)) != -1:
-                tab_name = self.tab_widget.tabText(idx).replace(" *", "")
-            else:
-                tab_name = "Untitled"
-
-            reply = QMessageBox.question(self, "Save Changes?", f"Save changes to {tab_name}?",
-                                         QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel)
-
-            if reply == QMessageBox.StandardButton.Save:
-                if not self._action_save_file(widget):
-                    event.ignore()
-                    return
-            elif reply == QMessageBox.StandardButton.Cancel:
-                event.ignore()
-                return
-
-        if is_editor_widget and widget in self.editor_tabs_data:
-            del self.editor_tabs_data[widget]
+        # --- MODIFIED: No more save prompt, just save a draft if needed ---
+        if isinstance(widget, EditorWidget):
+            if self._is_editor_modified(widget):
+                self._save_draft(widget)
+            if widget in self.editor_tabs_data:
+                del self.editor_tabs_data[widget]
 
         event.accept()
 
@@ -641,28 +702,21 @@ class MainWindow(QMainWindow):
         if self._is_app_closing: e.accept(); return
         self._is_app_closing = True
 
-        open_fps = [d.get('filepath') for w, d in self.editor_tabs_data.items() if
-                    isinstance(w, EditorWidget) and d.get('filepath')]
-        settings_manager.set("open_files", open_fps, save_immediately=False)
+        open_fps = []
+        for i in range(self.tab_widget.count()):
+            widget = self.tab_widget.widget(i)
+            if isinstance(widget, EditorWidget):
+                data = self.editor_tabs_data.get(widget)
+                if data and (filepath := data.get('filepath')):
+                    open_fps.append(filepath)
+                # --- NEW: Save final drafts on close ---
+                if self._is_editor_modified(widget):
+                    self._save_draft(widget)
 
+        settings_manager.set("open_files", open_fps, save_immediately=False)
         if hasattr(self, 'explorer_panel'):
             settings_manager.set("explorer_expanded_paths", self.explorer_panel.get_expanded_paths(),
                                  save_immediately=False)
-
-        while self.tab_widget.count() > 0:
-            dummy_event = QCloseEvent()
-            widget_to_close = self.tab_widget.widget(0)
-            self._close_widget_safely(widget_to_close, dummy_event)
-
-            if not dummy_event.isAccepted():
-                self._is_app_closing = False
-                e.ignore()
-                return
-
-            self.tab_widget.removeTab(0)
-
-        self.settings.set("window_size", [self.size().width(), self.size().height()], save_immediately=False)
-        self.settings.set("window_position", [self.pos().x(), self.pos().y()], save_immediately=False)
         self.project_manager.save_session()
         self.settings.save()
 
@@ -727,3 +781,69 @@ class MainWindow(QMainWindow):
                 log.info(f"Updated header for: {file_path}")
         except Exception as e:
             log.error(f"Failed to update header for {file_path}: {e}", exc_info=True)
+            
+    def _on_encoding_changed_from_dropdown(self, index: int):
+        editor = self.tab_widget.currentWidget()
+        if not isinstance(editor, EditorWidget):
+            return
+
+        new_encoding = self.encoding_combo.itemData(index)
+        data = self.editor_tabs_data.get(editor)
+        if not data or new_encoding == data.get('encoding'):
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "Change File Encoding",
+            f"This will re-save the file '{os.path.basename(data.get('filepath'))}' with the new encoding '{self.encoding_combo.currentText()}'.\n\n"
+            "This may alter the file content if it contains characters not supported by the new encoding. Are you sure you want to continue?",
+            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel
+        )
+
+        if reply == QMessageBox.StandardButton.Save:
+            self._resave_with_new_encoding(editor, new_encoding)
+        else:
+            # Revert the dropdown to the file's actual encoding
+            self._on_tab_changed(self.tab_widget.currentIndex())
+
+    def _resave_with_new_encoding(self, editor: EditorWidget, new_encoding: str):
+        data = self.editor_tabs_data.get(editor)
+        if not data or not data.get('filepath'):
+            return # Should not happen as dropdown is disabled for unsaved files
+
+        content = editor.get_text()
+        filepath = data['filepath']
+
+        # Use the file_handler to save with the new encoding
+        saved_path, final_encoding = self.file_handler.save_file_content(filepath, content, save_as=False, encoding=new_encoding)
+        
+        if saved_path:
+            # Update the editor's data store with the new encoding and reset the hash
+            data['encoding'] = final_encoding
+            data['original_hash'] = hash(content)
+            self._on_content_changed(editor) # Update modification status
+            self.statusBar().showMessage(f"File saved with new encoding: {self.reverse_encoding_map.get(final_encoding, final_encoding)}", 4000)
+        else:
+            self.statusBar().showMessage("Failed to re-save file with new encoding.", 4000)
+            self._on_tab_changed(self.tab_widget.currentIndex()) # Revert dropdown on failure
+
+    def _save_draft(self, editor: EditorWidget):
+        data = self.editor_tabs_data.get(editor)
+        if not data or not data['filepath']:
+            return  # Can't save a draft for an unsaved file
+
+        draft_path = helpers.get_draft_path(data['filepath'])
+        content = editor.get_text()
+        encoding = data.get('encoding', 'utf-8')
+        try:
+            with open(draft_path, 'w', encoding=encoding) as f:
+                f.write(content)
+            log.info(f"Saved draft for {os.path.basename(data['filepath'])}")
+        except (IOError, OSError) as e:
+            log.error(f"Failed to write draft file to {draft_path}: {e}")
+
+    def _save_current_draft(self):
+        if editor := self.tab_widget.currentWidget():
+            if isinstance(editor, EditorWidget) and self._is_editor_modified(editor):
+                self._save_draft(editor)

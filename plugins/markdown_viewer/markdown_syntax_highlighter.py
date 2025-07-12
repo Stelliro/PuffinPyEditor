@@ -103,18 +103,39 @@ class MarkdownSyntaxHighlighter(QSyntaxHighlighter):
         return formatter
 
     def highlightBlock(self, text: str):
-        self.setCurrentBlockState(0 if self.code_block_delimiter.match(text).hasMatch() else (1 if self.previousBlockState() == 1 else 0))
-        if self.currentBlockState() == 1:
-            code_bg = self.formats['code_block'].background().color()
-            corrected_fg = self._get_high_contrast_color(self.default_fg, code_bg)
-            block_format = QTextCharFormat(self.formats['code_block'])
-            block_format.setForeground(corrected_fg)
-            self.setFormat(0, len(text), block_format)
-        else:
-            for pattern, formatter in self.rules:
-                for match in pattern.globalMatch(text):
-                    formatter(match)
-        if self.code_block_delimiter.match(text).hasMatch(): self.setFormat(0, len(text), self.formats['marker'])
+        # State 0: Normal text, State 1: Inside a code block
+        is_in_code_block = self.previousBlockState() == 1
+        delimiter_match = self.code_block_delimiter.match(text)
+        
+        if is_in_code_block:
+            if delimiter_match.hasMatch():
+                # We are at the end of a code block, so mark this line
+                # as a delimiter and switch state back to normal.
+                self.setCurrentBlockState(0)
+                self.setFormat(0, len(text), self.formats['marker'])
+            else:
+                # We are still inside a code block. Apply the block format.
+                self.setCurrentBlockState(1)
+                code_bg = self.formats['code_block'].background().color()
+                corrected_fg = self._get_high_contrast_color(self.default_fg, code_bg)
+                block_format = QTextCharFormat(self.formats['code_block'])
+                block_format.setForeground(corrected_fg)
+                self.setFormat(0, len(text), block_format)
+        else: # Normal text block
+            if delimiter_match.hasMatch():
+                # This is the start of a new code block. Mark the delimiter
+                # line and switch the state for the next block.
+                self.setCurrentBlockState(1)
+                self.setFormat(0, len(text), self.formats['marker'])
+            else:
+                # This is a normal text line. Reset state and apply inline rules.
+                self.setCurrentBlockState(0)
+                # THE FIX: Replace the incorrect `for...in` loop.
+                for pattern, formatter in self.rules:
+                    iterator = pattern.globalMatch(text)
+                    while iterator.hasNext():
+                        match = iterator.next()
+                        formatter(match)
 
     def rehighlight(self):
         default_fg_color = self.theme_manager.current_theme_data.get("colors", {}).get("editor.foreground", "#ffffff")

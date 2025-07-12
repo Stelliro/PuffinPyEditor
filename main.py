@@ -3,8 +3,23 @@ import sys
 import traceback
 import os
 
+# --- Initial Dependency Check ---
+# This is a user-friendly check for the most critical dependency.
+# It provides a clear message if PyQt6 is not installed, which is
+# a common issue when running from source for the first time.
+try:
+    from PyQt6.QtWidgets import QApplication
+except ImportError:
+    print("---------------------------------------------------------")
+    print("FATAL ERROR: The 'PyQt6' library is not installed.")
+    print("This is a required dependency for PuffinPyEditor to run.")
+    print("\nPlease run the following command in your terminal:")
+    print("pip install -r requirements.txt")
+    print("---------------------------------------------------------")
+    # input("\nPress Enter to exit...") # Optional: uncomment to wait for user input
+    sys.exit(1)  # Exit with a non-zero code to indicate an error
+
 # --- Core Imports ---
-from PyQt6.QtWidgets import QApplication
 from app_core.theme_manager import ThemeManager
 from app_core.file_handler import FileHandler
 from utils.logger import log

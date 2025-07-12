@@ -16,6 +16,8 @@ class GitWorker(QObject):
     summaries_ready = pyqtSignal(dict)
     status_ready = pyqtSignal(list, list, list, str)
     error_occurred = pyqtSignal(str)
+    # NEW SIGNAL: Specifically for the "dubious ownership" error
+    dubious_ownership_detected = pyqtSignal(str)
     operation_success = pyqtSignal(str, dict)
     git_config_ready = pyqtSignal(str, str)
 
@@ -61,6 +63,17 @@ class GitWorker(QObject):
             log.error(f"Failed to set git config: {e}")
             self.error_occurred.emit(f"Failed to set Git config: {e}")
 
+    # NEW METHOD: To apply the fix suggested by Git
+    def add_safe_directory(self, path: str):
+        """Adds a directory to Git's global safe.directory list."""
+        try:
+            git.Git().config('--global', '--add', 'safe.directory', path)
+            log.info(f"Added '{path}' to global git safe.directory list.")
+            self.operation_success.emit(f"Marked '{os.path.basename(path)}' as a safe repository.", {'repo_path': path})
+        except GitCommandError as e:
+            log.error(f"Failed to add safe directory: {e}")
+            self.error_occurred.emit(f"Failed to mark repository as safe: {e}")
+
     def set_default_branch(self):
         """Sets the global Git config to use 'main' for new repositories."""
         try:
@@ -103,6 +116,18 @@ class GitWorker(QObject):
             untracked = repo.untracked_files
             conflicted = [path for path, _ in repo.index.unmerged_blobs().items()]
             self.status_ready.emit(staged, unstaged + untracked, conflicted, repo_path)
+        except GitCommandError as e:
+            # MODIFIED: Intelligent error detection
+            stderr_lower = str(e.stderr).lower()
+            if "dubious ownership" in stderr_lower:
+                log.warning(f"Git 'dubious ownership' error detected for {repo_path}")
+                self.dubious_ownership_detected.emit(repo_path)
+            else:
+                err_msg = (
+                    f"Git Status for '{os.path.basename(repo_path)}' "
+                    f"failed: {e.stderr.strip()}"
+                )
+                self.error_occurred.emit(err_msg)
         except (InvalidGitRepositoryError, ValueError) as e:
             err_msg = (
                 f"Git Status for '{os.path.basename(repo_path)}' "
@@ -112,10 +137,12 @@ class GitWorker(QObject):
 
     def commit_files(self, repo_path: str, message: str):
         try:
+            # FIX: Add a try-except block to handle non-Git folders gracefully.
             repo = Repo(repo_path)
             author = self._get_commit_author(repo)
             if not author:
-                self.error_occurred.emit("Commit author not found. Please set user.name and user.email in your Git config.")
+                self.error_occurred.emit(
+                    "Commit author not found. Please set user.name and user.email in your Git config.")
                 return
 
             repo.git.add(A=True)
@@ -129,11 +156,14 @@ class GitWorker(QObject):
                     "No new changes to commit.",
                     {'repo_path': repo_path, 'no_changes': True}
                 )
+        except InvalidGitRepositoryError:
+            self.error_occurred.emit(f"'{os.path.basename(repo_path)}' is not a valid Git repository.")
         except GitCommandError as e:
             self.error_occurred.emit(f"Git Commit failed: {e.stderr}")
 
     def push(self, repo_path: str, tag_name: Optional[str] = None):
         try:
+            # FIX: Add a try-except block to handle non-Git folders gracefully.
             repo = Repo(repo_path)
             origin = repo.remotes.origin
             if tag_name:
@@ -150,9 +180,14 @@ class GitWorker(QObject):
                 )
                 origin.push(refspec=f'{active_branch}:{active_branch}')
                 self.operation_success.emit("Push successful", {})
+        except InvalidGitRepositoryError:
+            self.error_occurred.emit(f"'{os.path.basename(repo_path)}' is not a valid Git repository.")
         except GitCommandError as e:
             stderr = str(e.stderr).lower()
-            if "authentication failed" in stderr:
+            if "updates were rejected" in stderr:
+                msg = ("Push rejected because the remote has changes you do not have locally. "
+                       "Please 'Pull' changes from the remote, resolve any conflicts, and then try pushing again.")
+            elif "authentication failed" in stderr:
                 msg = ("Authentication failed. Please ensure you have configured a "
                        "Git Credential Manager or are using SSH for your remote URL. "
                        "Using passwords over HTTPS is not supported by GitHub.")
@@ -168,12 +203,15 @@ class GitWorker(QObject):
 
     def pull(self, repo_path: str):
         try:
+            # FIX: Add a try-except block to handle non-Git folders gracefully.
             repo = Repo(repo_path)
             origin = repo.remotes.origin
             log.info(f"Pulling from remote '{origin.url}'...")
             origin.pull()
             self.operation_success.emit("Pull successful", {})
             self.get_status(repo_path)
+        except InvalidGitRepositoryError:
+            self.error_occurred.emit(f"'{os.path.basename(repo_path)}' is not a valid Git repository.")
         except GitCommandError as e:
             stderr = str(e.stderr).lower()
             if "authentication failed" in stderr:
@@ -244,7 +282,8 @@ class GitWorker(QObject):
             repo = Repo(repo_path)
             author = self._get_commit_author(repo)
             if not author:
-                self.error_occurred.emit("Commit author not found. Please set user.name and user.email in your Git config.")
+                self.error_occurred.emit(
+                    "Commit author not found. Please set user.name and user.email in your Git config.")
                 return
 
             if not repo.head.is_valid():
@@ -252,7 +291,8 @@ class GitWorker(QObject):
                 gitignore_path = os.path.join(repo_path, ".gitignore")
                 if not os.path.exists(gitignore_path):
                     with open(gitignore_path, 'w', encoding='utf-8') as f:
-                        f.write("# Python\n__pycache__/\n*.pyc\n\n# Env\n.env\nvenv/\n.venv/\n\n# Build\nbuild/\ndist/\n*.egg-info/\n")
+                        f.write(
+                            "# Python\n__pycache__/\n*.pyc\n\n# Env\n.env\nvenv/\n.venv/\n\n# Build\nbuild/\ndist/\n*.egg-info/\n")
                 repo.git.add(A=True)
                 if repo.is_dirty(untracked_files=True):
                     repo.index.commit("Initial commit", author=author, committer=author)
@@ -263,7 +303,7 @@ class GitWorker(QObject):
             if tag in repo.tags:
                 log.warning(f"Tag '{tag}' already exists. Re-creating it.")
                 repo.delete_tag(tag)
-            
+
             repo.create_tag(tag, message=title)
             self.operation_success.emit(f"Tag created: {tag}", {})
         except GitCommandError as e:
@@ -292,8 +332,9 @@ class GitWorker(QObject):
             repo = Repo.init(path)
             author = self._get_commit_author(repo)
             if not author:
-                 self.error_occurred.emit("Could not determine commit author to publish. Please configure Git user.name and user.email.")
-                 return
+                self.error_occurred.emit(
+                    "Could not determine commit author to publish. Please configure Git user.name and user.email.")
+                return
 
             repo.git.branch('-M', 'main')
             if (repo.is_dirty(untracked_files=True) and
@@ -334,7 +375,8 @@ class GitWorker(QObject):
                     not repo.head.is_valid()):
                 author = self._get_commit_author(repo)
                 if not author:
-                    self.error_occurred.emit("Could not determine commit author. Please configure Git user.name and user.email.")
+                    self.error_occurred.emit(
+                        "Could not determine commit author. Please configure Git user.name and user.email.")
                     return
                 repo.git.add(A=True)
                 repo.index.commit(
@@ -365,6 +407,8 @@ class SourceControlManager(QObject):
     summaries_ready = pyqtSignal(dict)
     status_updated = pyqtSignal(list, list, list, str)
     git_error = pyqtSignal(str)
+    # NEW SIGNAL
+    dubious_ownership_detected = pyqtSignal(str)
     git_success = pyqtSignal(str, dict)
     git_config_ready = pyqtSignal(str, str)
 
@@ -383,9 +427,10 @@ class SourceControlManager(QObject):
     _request_set_git_config = pyqtSignal(str, str)
     _request_fix_branches = pyqtSignal(str)
     _request_set_default_branch = pyqtSignal()
-    # NEW SIGNALS
     _request_force_push = pyqtSignal(str)
     _request_abort_merge = pyqtSignal(str)
+    # NEW REQUEST SIGNAL
+    _request_add_safe_directory = pyqtSignal(str)
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -409,13 +454,14 @@ class SourceControlManager(QObject):
             self.worker.fix_main_master_divergence)
         self._request_set_default_branch.connect(
             self.worker.set_default_branch)
-        # NEW CONNECTIONS
         self._request_force_push.connect(self.worker.force_push)
         self._request_abort_merge.connect(self.worker.abort_merge)
+        self._request_add_safe_directory.connect(self.worker.add_safe_directory)
 
         self.worker.summaries_ready.connect(self.summaries_ready)
         self.worker.status_ready.connect(self.status_updated)
         self.worker.error_occurred.connect(self.git_error)
+        self.worker.dubious_ownership_detected.connect(self.dubious_ownership_detected)
         self.worker.operation_success.connect(self.git_success)
         self.worker.git_config_ready.connect(self.git_config_ready)
         self.thread.start()
@@ -427,7 +473,7 @@ class SourceControlManager(QObject):
         if match := re.search(r"github\.com:([^/]+)/([^/.]+)", url):
             return match.group(1), match.group(2)
         return None, None
-    
+
     def _get_commit_author(self, repo_path: str) -> Optional[Actor]:
         try:
             repo = Repo(repo_path)
@@ -446,6 +492,11 @@ class SourceControlManager(QObject):
 
     def set_git_config(self, name: str, email: str):
         self._request_set_git_config.emit(name, email)
+
+    # NEW PUBLIC METHOD
+    def add_safe_directory(self, path: str):
+        """Requests the worker to add a path to the safe.directory list."""
+        self._request_add_safe_directory.emit(path)
 
     def set_default_branch_to_main(self):
         self._request_set_default_branch.emit()
@@ -473,8 +524,7 @@ class SourceControlManager(QObject):
 
     def pull(self, path: str):
         self._request_pull.emit(path)
-        
-    # NEW PUBLIC METHODS
+
     def force_push(self, path: str):
         self._request_force_push.emit(path)
 

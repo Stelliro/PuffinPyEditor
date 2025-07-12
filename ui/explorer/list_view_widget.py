@@ -226,8 +226,10 @@ class StyledTreeView(QTreeWidget):
 
         dest_dir = target_path if target_data.get('is_dir') else os.path.dirname(target_path)
 
+        # FIX: The QDropEvent class uses 'modifiers()', not 'keyboardModifiers()'.
         is_copy = (
-                              event.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier) == Qt.KeyboardModifier.ControlModifier
+            event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ) == Qt.KeyboardModifier.ControlModifier
 
         operation = self.file_handler.copy_item_to_dest if is_copy else self.file_handler.move_item
 
@@ -647,3 +649,8 @@ class FileSystemListView(QWidget):
 
     def _action_duplicate(self, path: str):
         self._perform_file_operation(self.file_handler.duplicate_item, path)
+
+    def _action_remove_boms(self, path: str):
+        """Triggers the BOM removal process via the file handler."""
+        # This will be handled by the new methods in FileHandler
+        self.file_handler.remove_boms_in_path(path)

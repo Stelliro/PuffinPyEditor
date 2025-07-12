@@ -37,7 +37,7 @@ class ProjectSourceControlPanel(QWidget):
         self.api = puffin_api
         self.staged_color = QColor("#A7C080")
         self.unstaged_color = QColor("#DBBC7F")
-        self.conflicted_color = QColor("#E53935") # Added color for conflicts
+        self.conflicted_color = QColor("#E53935")  # Added color for conflicts
         self._setup_ui()
         self._connect_signals()
         self.update_icons()
@@ -52,7 +52,7 @@ class ProjectSourceControlPanel(QWidget):
         self.pull_button = QPushButton("Pull")
         self.push_button = QPushButton("Push")
         self.new_release_button = QPushButton("New Release...")
-        
+
         main_actions_layout.addWidget(self.refresh_all_button)
         main_actions_layout.addWidget(self.pull_button)
         main_actions_layout.addWidget(self.push_button)
@@ -72,12 +72,12 @@ class ProjectSourceControlPanel(QWidget):
         self.abort_merge_button.setToolTip("Aborts a conflicted merge and resets your branch.")
         self.cleanup_tags_button = QPushButton("Cleanup Tags")
         self.cleanup_tags_button.setToolTip("Delete remote tags that are not part of a release.")
-        
+
         advanced_actions_layout.addWidget(self.force_push_button)
         advanced_actions_layout.addWidget(self.abort_merge_button)
         advanced_actions_layout.addStretch()
         advanced_actions_layout.addWidget(self.cleanup_tags_button)
-        self.abort_merge_button.hide() # Hide by default
+        self.abort_merge_button.hide()  # Hide by default
         layout.addWidget(advanced_actions_frame)
 
         self.project_tree = QTreeWidget()
@@ -111,10 +111,11 @@ class ProjectSourceControlPanel(QWidget):
         self.git_manager.status_updated.connect(self._update_project_files)
         self.git_manager.summaries_ready.connect(self._populate_tree)
         self.git_manager.git_error.connect(self._handle_git_error)
+        self.git_manager.dubious_ownership_detected.connect(self._handle_dubious_ownership)
         self.git_manager.git_success.connect(self._handle_git_success)
         self.github_manager.operation_success.connect(self._handle_git_success)
         self.github_manager.operation_failed.connect(self._handle_git_error)
-        
+
         self.refresh_all_button.clicked.connect(self.refresh_all_projects)
         self.push_button.clicked.connect(self._on_push_clicked)
         self.pull_button.clicked.connect(self._on_pull_clicked)
@@ -127,7 +128,7 @@ class ProjectSourceControlPanel(QWidget):
 
     def set_ui_locked(self, locked: bool, message: str = ""):
         for button in self.action_buttons:
-            if button != self.abort_merge_button: 
+            if button != self.abort_merge_button:
                 button.setEnabled(not locked)
         self.commit_message_edit.setEnabled(not locked)
         self.status_label.setText(message)
@@ -169,7 +170,7 @@ class ProjectSourceControlPanel(QWidget):
     def _on_force_push_clicked(self):
         if not (path := self._get_selected_project_path()):
             return
-        
+
         reply = QMessageBox.warning(
             self,
             "Confirm Force Push",
@@ -182,7 +183,7 @@ class ProjectSourceControlPanel(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             self.set_ui_locked(True, f"Force pushing {os.path.basename(path)}...")
             self.git_manager.force_push(path)
-            
+
     def _on_abort_merge_clicked(self):
         if not (path := self._get_selected_project_path()):
             return
@@ -203,13 +204,15 @@ class ProjectSourceControlPanel(QWidget):
         message = self.commit_message_edit.currentText().strip()
 
         if message.lower().startswith("git commit"):
-             QMessageBox.warning(self, "Invalid Message", "Please enter only the commit message, not the full 'git commit' command.")
-             return
+            QMessageBox.warning(self, "Invalid Message",
+                                "Please enter only the commit message, not the full 'git commit' command.")
+            return
 
         if not path or not message:
-            QMessageBox.warning(self, "Commit Failed", "A project must be selected and a commit message must be provided.")
+            QMessageBox.warning(self, "Commit Failed",
+                                "A project must be selected and a commit message must be provided.")
             return
-            
+
         # FIX: The manager now handles the author, so we don't need to create the Actor here.
         self.set_ui_locked(True, f"Committing changes in {os.path.basename(path)}...")
         self.git_manager.commit_files(path, message)
@@ -233,7 +236,7 @@ class ProjectSourceControlPanel(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Git Error", f"Could not analyze repository: {e}")
             return
-            
+
         reply = QMessageBox.question(
             self,
             "Confirm Tag Cleanup",
@@ -247,11 +250,11 @@ class ProjectSourceControlPanel(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             self.set_ui_locked(True, f"Cleaning up tags for {owner}/{repo_name}...")
             self.github_manager.cleanup_orphaned_tags(owner, repo_name)
-    
+
     def _on_fix_branch_mismatch_clicked(self, path: str):
         reply = QMessageBox.warning(
             self, "Confirm Branch Fix", "This will perform a force-push and delete "
-            "the 'master' branch from the remote. Are you sure?",
+                                        "the 'master' branch from the remote. Are you sure?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel
         )
@@ -261,10 +264,10 @@ class ProjectSourceControlPanel(QWidget):
 
     def _handle_git_success(self, message: str, data: dict):
         if data.get("deleted_tags") is not None:
-             QMessageBox.information(self, "Cleanup Complete", message)
+            QMessageBox.information(self, "Cleanup Complete", message)
 
         self.set_ui_locked(False, f"Success: {message}")
-        
+
         if "committed" in message.lower() and not data.get('no_changes'):
             commit_message = self.commit_message_edit.currentText().strip()
             history = settings_manager.get("commit_message_history", [])
@@ -274,9 +277,31 @@ class ProjectSourceControlPanel(QWidget):
             max_history = settings_manager.get("max_commit_history", 50)
             settings_manager.set("commit_message_history", history[:max_history])
             self._populate_commit_history()
-        
+
         self.refresh_all_projects()
 
+    # NEW METHOD
+    def _handle_dubious_ownership(self, repo_path: str):
+        """Shows a user-friendly dialog for the 'dubious ownership' error."""
+        self.set_ui_locked(False, "Git ownership issue detected.")
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Warning)
+        msg_box.setWindowTitle("Git Security Warning")
+        msg_box.setText(
+            f"Git has detected a potential security issue with the repository at:\n<b>{repo_path}</b>"
+        )
+        msg_box.setInformativeText(
+            "This can happen if the repository was cloned by a different user or with different permissions. "
+            "To resolve this, you can mark this directory as safe in your global Git configuration.\n\n"
+            "Would you like to do this automatically?"
+        )
+        fix_button = msg_box.addButton("Fix Automatically", QMessageBox.ButtonRole.AcceptRole)
+        cancel_button = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        msg_box.exec()
+
+        if msg_box.clickedButton() == fix_button:
+            self.set_ui_locked(True, f"Marking '{os.path.basename(repo_path)}' as safe...")
+            self.git_manager.add_safe_directory(repo_path)
 
     def _handle_git_error(self, error_message: str):
         self.set_ui_locked(False, "Operation Failed.")
@@ -336,11 +361,11 @@ class ProjectSourceControlPanel(QWidget):
             item_data = project_item.data(0, Qt.ItemDataRole.UserRole)
             if item_data and item_data.get('path') == repo_path:
                 project_item.takeChildren()
-                
+
                 repo = Repo(repo_path)
                 is_merging = os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD'))
                 self.abort_merge_button.setVisible(is_merging)
-                
+
                 if conflicted:
                     conflicts_header = QTreeWidgetItem(project_item, ["Conflicts (Resolve Manually)"])
                     conflicts_header.setForeground(0, self.conflicted_color)
@@ -379,7 +404,7 @@ class ProjectSourceControlPanel(QWidget):
                            lambda: self.git_manager.get_status(path))
             vis_action = menu.addAction(qta.icon('mdi.eye-outline'), "Change GitHub Visibility...")
             vis_action.triggered.connect(lambda: self.change_visibility_requested.emit(path))
-            
+
             repo = Repo(path)
             is_merging = os.path.exists(os.path.join(repo.git_dir, 'MERGE_HEAD'))
             if is_merging:

@@ -41,6 +41,10 @@ def show_project_context_menu(panel, position: QPoint, path: str, is_dir: bool, 
         menu.addAction(qta.icon('mdi.content-copy'), "Duplicate", partial(panel._action_duplicate, path))
         menu.addSeparator()
 
+        # --- NEW: BOM Removal Action ---
+        menu.addAction(qta.icon('mdi.code-tags-check'), "Remove BOM from Files...", partial(panel._action_remove_boms, path))
+        menu.addSeparator()
+
         if path.lower().endswith(('.py', '.js', '.cpp', '.c', '.cs')) and not is_dir:
             runner_plugin = panel.api.get_plugin_instance("script_runner")
             if runner_plugin:

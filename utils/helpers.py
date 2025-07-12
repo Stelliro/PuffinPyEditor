@@ -3,9 +3,10 @@ import sys
 import os
 import re
 import difflib
+import hashlib
 from typing import List, Optional
 from PyQt6.QtGui import QFontDatabase
-from .logger import log
+from .logger import log, get_app_data_path
 
 if sys.platform == "win32":
     try:
@@ -29,6 +30,21 @@ def get_base_path():
     else:
         # Assumes this file is in /utils, so two levels up is the project root
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+# --- NEW: Session/Draft Management Helpers ---
+def get_session_path() -> str:
+    """Returns the path to the session data directory, creating it if needed."""
+    session_dir = os.path.join(get_app_data_path(), "session_data", "drafts")
+    os.makedirs(session_dir, exist_ok=True)
+    return session_dir
+
+def get_draft_path(original_filepath: str) -> str:
+    """Generates a consistent, safe filename for a draft file."""
+    # Hash the full, absolute path to ensure uniqueness
+    path_hash = hashlib.sha256(original_filepath.encode('utf-8')).hexdigest()
+    return os.path.join(get_session_path(), f"{path_hash}.draft")
+# --- End of New Helpers ---
 
 
 def clean_git_conflict_markers(content: str) -> str:
