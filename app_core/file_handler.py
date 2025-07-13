@@ -316,15 +316,48 @@ class FileHandler(QObject):
             os.makedirs(path); log.info(f"Created folder: {path}"); self.item_created.emit("folder", path); return True, None
         except OSError as e: log.error(f"Failed to create folder at {path}: {e}", exc_info=True); return False, f"Failed to create folder: {e}"
 
-    def rename_item(self, old_path, new_name):
+    def rename_item(self, old_path: str, new_name: str) -> Tuple[bool, str]:
+        """Renames a file or folder, handling case-sensitivity issues."""
         new_name = new_name.strip()
-        if not new_name: return False, "Name cannot be empty."
-        if re.search(r'[<>:"/\\|?*]', new_name): return False, 'Name contains illegal characters (e.g., \\ / : * ? " < > |).'
+        if not new_name:
+            return False, "Name cannot be empty."
+
+        if re.search(r'[<>:"/\\|?*]', new_name):
+            return False, 'Name contains illegal characters (e.g., \\ / : * ? " < > |).'
+        
         new_path = os.path.join(os.path.dirname(old_path), new_name)
-        if os.path.exists(new_path): return False, f"'{new_name}' already exists here."
-        item_type = 'folder' if os.path.isdir(old_path) else 'file'
-        try: os.rename(old_path, new_path); log.info(f"Renamed '{old_path}' to '{new_path}'"); self.item_renamed.emit(item_type, old_path, new_path); return True, new_path
-        except OSError as e: log.error(f"Failed to rename '{old_path}': {e}", exc_info=True); return False, f"Failed to rename: {e}"
+
+        # Case-sensitive check
+        if old_path.lower() == new_path.lower() and old_path != new_path:
+            # This is a case-only rename on a potentially case-insensitive filesystem.
+            # Perform a safe two-step rename.
+            temp_path = old_path + '.puffin_rename_temp'
+            try:
+                os.rename(old_path, temp_path)
+                os.rename(temp_path, new_path)
+                item_type = 'folder' if os.path.isdir(new_path) else 'file'
+                self.item_renamed.emit(item_type, old_path, new_path)
+                return True, new_path
+            except OSError as e:
+                log.error(f"Failed to perform case-rename on '{old_path}': {e}", exc_info=True)
+                # If it failed, try to rename back
+                if os.path.exists(temp_path):
+                    os.rename(temp_path, old_path)
+                return False, f"Failed to rename: {e}"
+
+        # Standard check for existing file
+        if os.path.exists(new_path):
+            return False, f"'{new_name}' already exists in this location."
+
+        try:
+            item_type = 'folder' if os.path.isdir(old_path) else 'file'
+            os.rename(old_path, new_path)
+            log.info(f"Renamed '{old_path}' to '{new_path}'")
+            self.item_renamed.emit(item_type, old_path, new_path)
+            return True, new_path
+        except OSError as e:
+            log.error(f"Failed to rename '{old_path}': {e}", exc_info=True)
+            return False, f"Failed to rename: {e}"
 
     def delete_item(self, path):
         item_type = 'file' if os.path.isfile(path) else 'folder'

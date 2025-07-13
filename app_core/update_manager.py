@@ -1,7 +1,7 @@
 # PuffinPyEditor/app_core/update_manager.py
 import requests
 from packaging import version
-from typing import Dict
+from typing import Dict, List, Optional
 from PyQt6.QtCore import QObject, pyqtSignal
 from .settings_manager import settings_manager
 from utils.versioning import APP_VERSION
@@ -13,6 +13,31 @@ class UpdateManager(QObject):
     Checks for new application versions from a configured GitHub repository.
     """
     update_check_finished = pyqtSignal(dict)
+
+    def _find_latest_release(self, releases: List[Dict]) -> Optional[Dict]:
+        """
+        Parses a list of release objects and returns the one with the
+        highest semantic version.
+        """
+        latest_release = None
+        latest_parsed_version = version.parse("0.0.0")
+
+        for release in releases:
+            tag_name = release.get("tag_name", "").lstrip('v')
+            if not tag_name:
+                continue
+
+            try:
+                # packaging.version can handle pre-releases like 'beta', 'rc1'
+                current_parsed_version = version.parse(tag_name)
+                if current_parsed_version > latest_parsed_version:
+                    latest_parsed_version = current_parsed_version
+                    latest_release = release
+            except version.InvalidVersion:
+                log.warning(f"Skipping release with invalid tag version: {tag_name}")
+                continue
+        
+        return latest_release
 
     def check_for_updates(self):
         """
@@ -47,14 +72,22 @@ class UpdateManager(QObject):
             log.error(f"Update check failed: {msg}")
             self.update_check_finished.emit({"error": msg})
             return
-
-        api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/latest"
-        log.info(f"Checking for latest release at: {api_url}")
+        
+        # --- FIX: Use /releases endpoint to get all releases, not just the latest "full" one ---
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/releases"
+        log.info(f"Fetching release list from: {api_url}")
 
         try:
             response = requests.get(api_url, timeout=15)
             response.raise_for_status()
-            release_data = response.json()
+            
+            # --- FIX: Find the latest release from the list ---
+            release_data = self._find_latest_release(response.json())
+            if not release_data:
+                msg = "No valid releases found in the repository."
+                log.warning(msg)
+                self.update_check_finished.emit({"update_available": False, "message": msg})
+                return
 
             latest_version_tag = release_data.get("tag_name", "").lstrip('v')
             if not latest_version_tag:
@@ -87,10 +120,10 @@ class UpdateManager(QObject):
                         "was available for download."
                     )
                     self.update_check_finished.emit(
-                        {"update_available": False})
+                        {"update_available": False, "message": "Update found but no .zip file attached."})
             else:
                 log.info("Application is up to date.")
-                self.update_check_finished.emit({"update_available": False})
+                self.update_check_finished.emit({"update_available": False, "message": "You are on the latest version."})
 
         except requests.exceptions.HTTPError as e:
             msg = f"Could not fetch update info (HTTP {e.response.status_code})."

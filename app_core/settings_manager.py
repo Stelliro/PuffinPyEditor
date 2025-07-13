@@ -47,20 +47,7 @@ DEFAULT_SETTINGS = {
     "commit_message_history": [],  # NEW: For storing commit history
     "max_commit_history": 50,      # NEW: To limit the history size
     "ai_export_loadouts": {},
-    "ai_export_golden_rules": {
-        "Default Golden Rules": [
-            "Do not remove any code that is unrelated to the fix, only remove "
-            "code if it is being substituted or is not needed anymore.",
-            "Only edit and add features, the only features should stay unless "
-            "asked to be removed, or may be completely redundant.",
-            "any scripts over 1000 lines, please write in a new response.",
-            "multiple scripts together exceeding 2000 lines together need to "
-            "be separated into smaller responses, (example: these scripts "
-            "have 2340 lines together I'm going to separate it into 2 "
-            "messages that way i dont lose formatting and dont accidentally "
-            "remove any features)"
-        ]
-    },
+    "ai_export_golden_rules": {},  # MODIFIED: Start with an empty dictionary
     "cleanup_after_build": True,
     "nsis_path": ""
 }

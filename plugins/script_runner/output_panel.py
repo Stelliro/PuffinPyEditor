@@ -1,7 +1,7 @@
 # PuffinPyEditor/plugins/script_runner/output_panel.py
 from typing import TYPE_CHECKING
 from PyQt6.QtWidgets import QDockWidget, QTextEdit, QVBoxLayout, QWidget, QPushButton, QHBoxLayout
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QFont, QColor, QTextCursor
 from PyQt6.QtCore import Qt
 from app_core.settings_manager import settings_manager
 
@@ -37,18 +37,37 @@ class OutputPanel(QDockWidget):
         self.update_theme()
 
     def append_output(self, text: str, is_error: bool = False):
-        original_text_color = self.output_text_edit.textColor()
+        """
+        Appends text to the output panel, handling color for errors and ensuring
+        correct line endings.
+        """
+        # --- FIX: Use insertPlainText with a cursor to prevent extra newlines ---
+        cursor = self.output_text_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.output_text_edit.setTextCursor(cursor)
+        
+        original_format = cursor.charFormat()
+        
         if is_error:
             colors = self.theme_manager.current_theme_data.get("colors", {})
             error_color_hex = colors.get("syntax.comment", "#FF4444")
             error_color = QColor(error_color_hex if error_color_hex else "#FF0000")
-            self.output_text_edit.setTextColor(error_color)
+            
+            error_format = cursor.charFormat()
+            error_format.setForeground(error_color)
+            cursor.setCharFormat(error_format)
 
-        self.output_text_edit.append(text.strip())
+        # Insert text without adding an automatic newline
+        cursor.insertText(text)
+
+        # Restore the original format
         if is_error:
-            self.output_text_edit.setTextColor(original_text_color)
+            cursor.setCharFormat(original_format)
+
+        # Keep scrolled to the bottom
         scrollbar = self.output_text_edit.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+
 
     def clear_output(self):
         self.output_text_edit.clear()

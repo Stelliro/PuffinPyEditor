@@ -16,16 +16,37 @@ class PluginPublisherPlugin:
         self.update_action_state()
         github_manager = self.api.get_manager("github")
         if github_manager:
-            github_manager.auth_successful.connect(lambda user: self.update_action_state())
-            github_manager.auth_failed.connect(lambda err: self.update_action_state())
+            # Connect to a method that can be disconnected reliably
+            github_manager.auth_successful.connect(self._on_auth_state_changed)
+            github_manager.auth_failed.connect(self._on_auth_state_changed)
 
     def shutdown(self):
+        # Disconnect signals to prevent calls to a deleted object
+        github_manager = self.api.get_manager("github")
+        if github_manager:
+            try:
+                github_manager.auth_successful.disconnect(self._on_auth_state_changed)
+                github_manager.auth_failed.disconnect(self._on_auth_state_changed)
+            except (TypeError, RuntimeError):
+                # This can happen if the connection was already broken.
+                # It's safe to ignore.
+                pass
+
         if self.publish_action:
             # Use a safer way to get the menu
             if hasattr(self.api.get_main_window(), 'tools_menu'):
                  self.api.get_main_window().tools_menu.removeAction(self.publish_action)
             self.publish_action.deleteLater()
+            # Nullify the reference to prevent further access
+            self.publish_action = None
         log.info("Plugin Publisher shutdown complete.")
+
+    def _on_auth_state_changed(self, *args, **kwargs):
+        """
+        Slot to handle authentication state changes. This will call the UI
+        update method.
+        """
+        self.update_action_state()
 
     def show_publish_dialog(self):
         github_manager = self.api.get_manager("github")
@@ -40,6 +61,10 @@ class PluginPublisherPlugin:
         self.publish_dialog.activateWindow()
 
     def update_action_state(self):
+        # Add a guard to ensure the action exists before modification.
+        if not self.publish_action:
+            return
+            
         github_manager = self.api.get_manager("github")
         is_logged_in = bool(github_manager and github_manager.get_authenticated_user())
         self.publish_action.setEnabled(is_logged_in)

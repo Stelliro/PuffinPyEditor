@@ -557,12 +557,13 @@ class MainWindow(QMainWindow):
 
     def _action_save_file(self, editor_widget=None, save_as=False):
         editor = editor_widget or self.tab_widget.currentWidget()
-        if not (isinstance(editor, EditorWidget) and (data := self.editor_tabs_data.get(editor))): return None
+        if not (isinstance(editor, EditorWidget) and (data := self.editor_tabs_data.get(editor))):
+            return None
 
         content = editor.get_text()
         encoding = data.get('encoding', 'utf-8')
         
-        # --- MODIFIED: Clear draft on successful save ---
+        # This will either do a 'Save As...' (if filepath is missing or save_as=True) or a direct 'Save'.
         new_fp, new_encoding = self.file_handler.save_file_content(data['filepath'], content, save_as, encoding=encoding)
         
         if new_fp:
@@ -573,15 +574,25 @@ class MainWindow(QMainWindow):
                 log.info(f"Removed draft file for saved file: {new_fp}")
 
             self.file_handler._add_to_recent_files(new_fp)
-            data.update({'filepath': new_fp, 'original_hash': hash(content), 'encoding': new_encoding})
+
+            # --- FIX: Reassign the entire dictionary for the editor to ensure its state is fully updated.
+            # This robustly handles the transition from an unsaved "Untitled" file to a saved file with a path.
+            self.editor_tabs_data[editor] = {
+                'filepath': new_fp,
+                'original_hash': hash(content),
+                'encoding': new_encoding
+            }
+            # --- END FIX ---
+            
             editor.set_filepath(new_fp)
+            
             if (idx := self.tab_widget.indexOf(editor)) != -1:
-                self.tab_widget.setTabText(idx, os.path.basename(new_fp));
+                self.tab_widget.setTabText(idx, os.path.basename(new_fp))
                 self.tab_widget.setTabToolTip(idx, new_fp)
-            self.statusBar().showMessage(f"File saved: {os.path.basename(new_fp)}", 3000);
-            self._on_content_changed(editor);
-            # Update status bar immediately after saving
-            self._on_tab_changed(self.tab_widget.currentIndex())
+                
+            self.statusBar().showMessage(f"File saved: {os.path.basename(new_fp)}", 3000)
+            self._on_content_changed(editor)  # This will remove the '*' modification marker
+            self._on_tab_changed(self.tab_widget.currentIndex()) # Update status bar with encoding
             return new_fp
         
         self.statusBar().showMessage("Save cancelled.", 2000)

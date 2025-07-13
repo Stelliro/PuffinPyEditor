@@ -1,260 +1,182 @@
 # PuffinPyEditor/plugins/ai_tools/ai_export_dialog.py
 import os
+import sys
 import json
-from typing import List, Dict, Optional
+import importlib.util
+from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QWidget, QGroupBox,
-    QTreeView, QTextEdit, QListWidget, QListWidgetItem, QPushButton,
-    QDialogButtonBox, QMessageBox, QInputDialog, QComboBox, QProgressDialog,
-    QApplication, QCheckBox, QLabel, QToolButton
+    QTreeView, QTextEdit, QPushButton, QDialogButtonBox, QMessageBox,
+    QComboBox, QProgressDialog, QApplication, QCheckBox, QLabel, QToolButton
 )
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QCursor
 from PyQt6.QtCore import Qt, QCoreApplication
+
 import qtawesome as qta
 
+from app_core.puffin_api import PuffinPluginAPI
 from app_core.settings_manager import settings_manager
 from app_core.project_manager import ProjectManager
 from app_core.linter_manager import LinterManager
+from app_core import golden_rules
 from utils.logger import log
 from utils.helpers import get_base_path
 from .api_client import ApiClient
 from .ai_response_dialog import AIResponseDialog
-
-PROMPT_TYPE_DEFAULT = "default"
-PROMPT_TYPE_GENERATIVE = "generative"
-PROMPT_TYPE_COMMUNITY = "community"
-PROMPT_TYPE_USER = "user"
-
-DEFAULT_LOADOUTS = {
-    "Code Review": {
-        "instructions": (
-            "You are a senior Python developer performing a code review. "
-            "Analyze the provided code for issues related to correctness, "
-            "style, performance, and maintainability. Provide constructive "
-            "feedback and concrete examples for improvement."
-        ),
-        "guidelines": [
-            "Check for compliance with PEP 8 style guidelines.",
-            "Identify potential bugs or logical errors.",
-            "Suggest more efficient or 'Pythonic' ways to write the code.",
-            "Comment on code clarity, variable naming, and documentation.",
-            "Do not suggest new features; focus on improving the existing code.",
-            "Structure your feedback by file, then by line number where "
-            "applicable."
-        ]
-    },
-    "Documentation Generation": {
-        "instructions": (
-            "You are a technical writer. Your task is to generate clear and "
-            "comprehensive documentation for the provided Python code. Create "
-            "docstrings for all public classes, methods, and functions that "
-            "are missing them. Follow the Google Python Style Guide for "
-            "docstrings."
-        ),
-        "guidelines": [
-            "For each function/method, include an 'Args:' section for "
-            "parameters and a 'Returns:' section for the return value.",
-            "The main description of the function should be a concise, "
-            "one-sentence summary.",
-            "If a function raises exceptions, include a 'Raises:' section.",
-            "Ensure the generated documentation is professional and ready to "
-            "be used in the project."
-        ]
-    }
-}
+from .persona_manager_dialog import PersonaManagerDialog
+from .style_preset_manager import StylePresetManager
+from .persona_logic import get_files_for_persona
 
 
 class AIExportDialog(QDialog):
     """
-    A dialog for configuring and exporting a project's context for an AI
-    model.
+    A dialog for selecting an AI Persona and exporting a project's context.
     """
-    def __init__(self, project_path: str, project_manager: ProjectManager,
-                 linter_manager: LinterManager, parent: Optional[QWidget] = None):
+
+    def __init__(self, project_path: str, puffin_api: PuffinPluginAPI, parent: Optional[QWidget] = None):
         super().__init__(parent)
+        self.api = puffin_api
         self.project_path = project_path
-        self.project_manager = project_manager
-        self.linter_manager = linter_manager
+        self.project_manager = self.api.get_manager("project")
+        self.linter_manager = self.api.get_manager("linter")
         self.api_client = ApiClient(settings_manager)
-        self.loadouts: Dict[str, Dict] = {}
-        self.golden_rule_sets: Dict[str, List[str]] = {}
-        self.prompt_sources: Dict[str, Dict] = {}
+        self.preset_manager = StylePresetManager()
+
+        self.personas: Dict[str, Dict] = {}
+        self.persona_modules: Dict[str, Any] = {}
+
         self.selected_files: List[str] = []
         self._is_updating_checks = False
 
-        self.setWindowTitle("Export Project for AI")
+        self.setWindowTitle("AI Task Manager")
         self.setMinimumSize(950, 700)
         self.setObjectName("AIExportDialog")
 
         self._setup_ui()
         self._connect_signals()
         self._populate_file_tree()
-        self._load_and_populate_prompts()
-        self._load_and_populate_golden_rule_sets()
-        self._update_toggle_button_state()
+        self._load_and_populate_personas()
+        self._populate_style_presets()
 
     def _setup_ui(self):
         self.main_layout = QVBoxLayout(self)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.main_layout.addWidget(self.splitter)
+        self.main_layout.addWidget(self.splitter, 1)
         self._create_left_pane()
         self._create_right_pane()
         self.splitter.setSizes([350, 600])
 
-        bottom_layout = QHBoxLayout()
-
-        # --- Combined API and Context Options Group ---
+        bottom_options_layout = QHBoxLayout()
         api_context_group = QGroupBox("Execution & Context")
         api_context_layout = QVBoxLayout(api_context_group)
         api_mode_layout = QHBoxLayout()
         self.api_mode_checkbox = QCheckBox("Enable API Mode")
-        self.api_mode_checkbox.setToolTip(
-            "Send context directly to an AI API instead of exporting a file.")
+        self.api_mode_checkbox.setToolTip("Send context directly to an AI API instead of exporting a file.")
         api_mode_layout.addWidget(self.api_mode_checkbox)
-        self.api_provider_combo = QComboBox()
-        self.api_provider_combo.addItems(
-            self.api_client.PROVIDER_CONFIG.keys()
-        )
-        api_mode_layout.addWidget(QLabel("Provider:"))
-        api_mode_layout.addWidget(self.api_provider_combo)
-        self.api_model_combo = QComboBox()
-        api_mode_layout.addWidget(QLabel("Model:"))
-        api_mode_layout.addWidget(self.api_model_combo)
+        api_mode_layout.addStretch()
         api_context_layout.addLayout(api_mode_layout)
 
-        context_options_layout = QHBoxLayout()
+        self.api_controls_widget = QWidget()
+        api_controls_layout = QHBoxLayout(self.api_controls_widget)
+        api_controls_layout.setContentsMargins(0, 5, 0, 0)
+        api_controls_layout.addWidget(QLabel("Provider:"))
+        self.api_provider_combo = QComboBox()
+        api_controls_layout.addWidget(self.api_provider_combo)
+        api_controls_layout.addWidget(QLabel("Model:"))
+        self.api_model_combo = QComboBox()
+        api_controls_layout.addWidget(self.api_model_combo)
+        api_context_layout.addWidget(self.api_controls_widget)
+
         self.include_linter_checkbox = QCheckBox("Include linter issues")
         self.include_linter_checkbox.setChecked(True)
-        self.include_linter_checkbox.setToolTip(
-            "Include linter analysis in the context.")
-        context_options_layout.addWidget(self.include_linter_checkbox)
-        context_options_layout.addStretch()
-        api_context_layout.addLayout(context_options_layout)
-        bottom_layout.addWidget(api_context_group, 1)
+        self.include_linter_checkbox.setToolTip("Include linter analysis in the context.")
+        api_context_layout.addWidget(self.include_linter_checkbox)
+        api_context_layout.addStretch()
+        bottom_options_layout.addWidget(api_context_group)
 
-        # --- File Export Options (only visible when not in API mode) ---
         self.export_options_group = QGroupBox("File Export Options")
-        export_options_layout = QHBoxLayout(self.export_options_group)
-        export_options_layout.addWidget(QLabel("Format:"))
+        export_layout = QVBoxLayout(self.export_options_group)
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Format:"))
         self.format_combo = QComboBox()
         self.format_combo.addItems(["AI-Optimized", "Standard Markdown"])
-        self.format_combo.setToolTip(
-            "Choose export format. 'AI-Optimized' is cleaner for models."
-        )
-        export_options_layout.addWidget(self.format_combo)
-        bottom_layout.addWidget(self.export_options_group, 1)
+        self.format_combo.setToolTip("Choose export format. 'AI-Optimized' is cleaner for models.")
+        format_layout.addWidget(self.format_combo)
+        export_layout.addLayout(format_layout)
+        export_layout.addStretch()
+        bottom_options_layout.addWidget(self.export_options_group)
 
-        self.main_layout.addLayout(bottom_layout)
-
+        self.main_layout.addLayout(bottom_options_layout)
         self.button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel |
-            QDialogButtonBox.StandardButton.Ok)
-        self.ok_button = self.button_box.button(
-            QDialogButtonBox.StandardButton.Ok)
-        self.ok_button.setText("Export")
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.ok_button = self.button_box.button(QDialogButtonBox.StandardButton.Ok)
         self.main_layout.addWidget(self.button_box)
+        self._init_providers_and_models()
         self._toggle_api_mode(self.api_mode_checkbox.isChecked())
 
     def _create_left_pane(self):
         left_pane = QWidget()
-        left_layout = QVBoxLayout(left_pane)
+        layout = QVBoxLayout(left_pane)
         self.splitter.addWidget(left_pane)
-        loadouts_group = QGroupBox("Prompt Loadouts")
-        loadouts_layout = QVBoxLayout(loadouts_group)
-        self.loadout_combo = QComboBox()
-        loadouts_layout.addWidget(self.loadout_combo)
-        loadout_buttons_layout = QHBoxLayout()
-        self.save_loadout_button = QPushButton("Save")
-        self.delete_loadout_button = QPushButton("Delete")
-        loadout_buttons_layout.addStretch()
-        loadout_buttons_layout.addWidget(self.save_loadout_button)
-        loadout_buttons_layout.addWidget(self.delete_loadout_button)
-        loadouts_layout.addLayout(loadout_buttons_layout)
-        left_layout.addWidget(loadouts_group)
 
-        files_group = QGroupBox("Select Files to Include")
+        persona_group = QGroupBox("1. Select AI Persona (Optional)")
+        persona_layout = QVBoxLayout(persona_group)
+        persona_selection_layout = QHBoxLayout()
+        self.persona_combo = QComboBox()
+        persona_selection_layout.addWidget(self.persona_combo, 1)
+        self.manage_personas_button = QPushButton("Manage...")
+        self.manage_personas_button.setIcon(qta.icon('fa5s.cog'))
+        self.manage_personas_button.setToolTip("Create, edit, or delete AI Personas")
+        persona_selection_layout.addWidget(self.manage_personas_button)
+        persona_layout.addLayout(persona_selection_layout)
+        self.persona_desc_label = QLabel("<i>Select a persona to see their expertise.</i>")
+        self.persona_desc_label.setWordWrap(True)
+        persona_layout.addWidget(self.persona_desc_label)
+        layout.addWidget(persona_group)
+
+        files_group = QGroupBox("2. Select Files to Include")
         files_layout = QVBoxLayout(files_group)
-        file_actions_layout = QHBoxLayout()
-        self.expand_all_button = QToolButton()
-        self.expand_all_button.setIcon(
-            qta.icon('fa5s.angle-double-down', color='grey'))
-        self.expand_all_button.setToolTip("Expand all folders in the tree.")
-
-        self.collapse_all_button = QToolButton()
-        self.collapse_all_button.setIcon(
-            qta.icon('fa5s.angle-double-up', color='grey'))
-        self.collapse_all_button.setToolTip(
-            "Collapse all folders in the tree.")
-
+        actions_layout = QHBoxLayout()
+        self.expand_all_button = QToolButton(icon=qta.icon('fa5s.angle-double-down', color='grey'), toolTip="Expand all folders.")
+        self.collapse_all_button = QToolButton(icon=qta.icon('fa5s.angle-double-up', color='grey'), toolTip="Collapse all folders.")
         self.toggle_select_button = QToolButton()
-        self.toggle_select_button.setAutoRaise(True)
-
-        for button in [self.expand_all_button, self.collapse_all_button]:
+        for button in [self.expand_all_button, self.collapse_all_button, self.toggle_select_button]:
             button.setAutoRaise(True)
-
-        file_actions_layout.addWidget(self.expand_all_button)
-        file_actions_layout.addWidget(self.collapse_all_button)
-        file_actions_layout.addStretch()
-        file_actions_layout.addWidget(self.toggle_select_button)
-        files_layout.addLayout(file_actions_layout)
-
+        actions_layout.addWidget(self.expand_all_button)
+        actions_layout.addWidget(self.collapse_all_button)
+        actions_layout.addStretch()
+        actions_layout.addWidget(self.toggle_select_button)
+        files_layout.addLayout(actions_layout)
         self.file_tree = QTreeView()
         self.file_tree.setHeaderHidden(True)
         self.file_model = QStandardItemModel()
         self.file_tree.setModel(self.file_model)
         files_layout.addWidget(self.file_tree)
-        left_layout.addWidget(files_group, 1)
+        layout.addWidget(files_group, 1)
 
     def _create_right_pane(self):
         right_pane = QWidget()
-        right_layout = QVBoxLayout(right_pane)
+        layout = QVBoxLayout(right_pane)
         self.splitter.addWidget(right_pane)
-        instructions_group = QGroupBox("Instructions for the AI")
-        instructions_layout = QVBoxLayout(instructions_group)
-        self.instructions_edit = QTextEdit()
-        self.instructions_edit.setPlaceholderText(
-            "e.g., Act as a senior developer...")
-        instructions_layout.addWidget(self.instructions_edit)
-        right_layout.addWidget(instructions_group, 1)
-        guidelines_group = QGroupBox("Specific Guidelines & Rules")
-        guidelines_layout = QVBoxLayout(guidelines_group)
-        self.guidelines_list = QListWidget()
-        self.guidelines_list.setAlternatingRowColors(True)
-        guidelines_layout.addWidget(self.guidelines_list, 1)
-        guideline_buttons_layout = QHBoxLayout()
-        self.add_guideline_button = QPushButton("Add")
-        self.edit_guideline_button = QPushButton("Edit")
-        self.remove_guideline_button = QPushButton("Remove")
-        guideline_buttons_layout.addStretch()
-        guideline_buttons_layout.addWidget(self.add_guideline_button)
-        guideline_buttons_layout.addWidget(self.edit_guideline_button)
-        guideline_buttons_layout.addWidget(self.remove_guideline_button)
-        guidelines_layout.addLayout(guideline_buttons_layout)
-        right_layout.addWidget(guidelines_group, 1)
-        golden_rules_group = QGroupBox("Golden Rules")
-        golden_rules_layout = QVBoxLayout(golden_rules_group)
-        golden_rules_top_layout = QHBoxLayout()
-        self.golden_rules_combo = QComboBox()
-        self.save_golden_rules_button = QPushButton("Save As New...")
-        self.delete_golden_rules_button = QPushButton("Delete")
-        golden_rules_top_layout.addWidget(self.golden_rules_combo, 1)
-        golden_rules_top_layout.addWidget(self.save_golden_rules_button)
-        golden_rules_top_layout.addWidget(self.delete_golden_rules_button)
-        golden_rules_layout.addLayout(golden_rules_top_layout)
-        self.golden_rules_list = QListWidget()
-        self.golden_rules_list.setAlternatingRowColors(True)
-        golden_rules_layout.addWidget(self.golden_rules_list, 1)
-        golden_rules_buttons_layout = QHBoxLayout()
-        self.add_golden_rule_button = QPushButton("Add")
-        self.edit_golden_rule_button = QPushButton("Edit")
-        self.remove_golden_rule_button = QPushButton("Remove")
-        golden_rules_buttons_layout.addStretch()
-        golden_rules_buttons_layout.addWidget(self.add_golden_rule_button)
-        golden_rules_buttons_layout.addWidget(self.edit_golden_rule_button)
-        golden_rules_buttons_layout.addWidget(self.remove_golden_rule_button)
-        golden_rules_layout.addLayout(golden_rules_buttons_layout)
-        right_layout.addWidget(golden_rules_group, 1)
+
+        goal_group = QGroupBox("3. Define Primary Goal (Optional)")
+        goal_layout = QVBoxLayout(goal_group)
+        self.user_goal_edit = QTextEdit()
+        self.user_goal_edit.setPlaceholderText(
+            "Leave blank for a general review based on the selected persona's expertise. Or, provide a specific goal, e.g., 'Refactor the database logic in file_handler.py' or 'Add a new endpoint to fetch user profiles'.")
+        goal_layout.addWidget(self.user_goal_edit, 1)
+        layout.addWidget(goal_group, 1)
+
+        rules_group = QGroupBox("4. Select Style Preset")
+        rules_layout = QVBoxLayout(rules_group)
+        self.rules_combo = QComboBox()
+        self.rules_combo.setToolTip("Select a set of stylistic rules for the AI.")
+        rules_layout.addWidget(self.rules_combo)
+        layout.addWidget(rules_group)
+
+        layout.addStretch(1)
 
     def _connect_signals(self):
         self.button_box.accepted.connect(self._start_export)
@@ -262,633 +184,382 @@ class AIExportDialog(QDialog):
         self.file_model.itemChanged.connect(self._on_item_changed)
         self.expand_all_button.clicked.connect(self.file_tree.expandAll)
         self.collapse_all_button.clicked.connect(self.file_tree.collapseAll)
-        self.toggle_select_button.clicked.connect(
-            self._on_toggle_select_clicked)
-        self.loadout_combo.currentIndexChanged.connect(
-            self._on_loadout_selected)
-        self.save_loadout_button.clicked.connect(self._save_loadout)
-        self.delete_loadout_button.clicked.connect(self._delete_loadout)
-        self.add_guideline_button.clicked.connect(self._add_guideline)
-        self.edit_guideline_button.clicked.connect(self._edit_guideline)
-        self.remove_guideline_button.clicked.connect(self._remove_guideline)
-        self.golden_rules_combo.currentIndexChanged.connect(
-            self._on_golden_rule_set_selected)
-        self.save_golden_rules_button.clicked.connect(
-            self._save_golden_rule_set)
-        self.delete_golden_rules_button.clicked.connect(
-            self._delete_golden_rule_set)
-        self.add_golden_rule_button.clicked.connect(self._add_golden_rule)
-        self.edit_golden_rule_button.clicked.connect(self._edit_golden_rule)
-        self.remove_golden_rule_button.clicked.connect(
-            self._remove_golden_rule)
+        self.toggle_select_button.clicked.connect(self._on_toggle_select_clicked)
+        self.persona_combo.currentIndexChanged.connect(self._on_persona_selected)
         self.api_mode_checkbox.toggled.connect(self._toggle_api_mode)
-        self.api_provider_combo.currentIndexChanged.connect(
-            self._on_api_provider_changed)
+        self.api_provider_combo.currentIndexChanged.connect(self._on_api_provider_changed)
+        self.manage_personas_button.clicked.connect(self._open_persona_manager)
 
-    def _toggle_api_mode(self, checked):
-        is_api_mode = checked
-        for w in [self.api_provider_combo, self.api_model_combo]:
-            w.setVisible(is_api_mode)
+    def _init_providers_and_models(self):
+        self.api_provider_combo.addItems(self.api_client.PROVIDER_CONFIG.keys())
+        self._on_api_provider_changed()
 
-        self.export_options_group.setVisible(not is_api_mode)
-        self.ok_button.setText("Send to AI" if is_api_mode else "Export")
+    def _open_persona_manager(self):
+        manager_dialog = PersonaManagerDialog(self.api.get_manager("theme"), self)
+        manager_dialog.finished.connect(self._load_and_populate_personas)
+        manager_dialog.finished.connect(self._populate_style_presets)
+        manager_dialog.exec()
 
-        if is_api_mode:
-            self._on_api_provider_changed()
+    def _toggle_api_mode(self, checked: bool):
+        self.api_controls_widget.setVisible(checked)
+        self.export_options_group.setVisible(not checked)
+        self.ok_button.setText("Send to AI" if checked else "Export")
 
     def _on_api_provider_changed(self):
         provider = self.api_provider_combo.currentText()
-        config = self.api_client.PROVIDER_CONFIG.get(provider, {})
-        models = config.get("models", [])
+        models = self.api_client.PROVIDER_CONFIG.get(provider, {}).get("models", [])
         self.api_model_combo.clear()
         self.api_model_combo.addItems(models)
 
     def _set_all_check_states(self, state: Qt.CheckState):
         self._is_updating_checks = True
-        try:
-            root = self.file_model.invisibleRootItem()
-            for row in range(root.rowCount()):
-                self._recursive_set_check_state(root.child(row), state)
-        finally:
-            self._is_updating_checks = False
+        root = self.file_model.invisibleRootItem()
+        for i in range(root.rowCount()):
+            self._recursive_set_state(root.child(i), state)
+        self._is_updating_checks = False
         self._update_toggle_button_state()
 
-    def _recursive_set_check_state(
-        self, item: QStandardItem, state: Qt.CheckState
-    ):
-        if item.isCheckable():
+    def _recursive_set_state(self, item: QStandardItem, state: Qt.CheckState):
+        if item.isCheckable() and item.checkState() != state:
             item.setCheckState(state)
-        for row in range(item.rowCount()):
-            if child_item := item.child(row):
-                self._recursive_set_check_state(child_item, state)
+        for i in range(item.rowCount()):
+            self._recursive_set_state(item.child(i), state)
 
     def _on_toggle_select_clicked(self):
-        if self._are_all_items_checked():
-            self._set_all_check_states(Qt.CheckState.Unchecked)
-        else:
-            self._set_all_check_states(Qt.CheckState.Checked)
+        new_state = Qt.CheckState.Unchecked if self._are_all_items_checked() else Qt.CheckState.Checked
+        self._set_all_check_states(new_state)
 
-    def _update_toggle_button_state(self):
-        if self._are_all_items_checked():
-            self.toggle_select_button.setIcon(
-                qta.icon('fa5s.check-square', color='grey'))
-            self.toggle_select_button.setToolTip("Deselect all files.")
-        else:
-            self.toggle_select_button.setIcon(
-                qta.icon('fa5.square', color='grey'))
-            self.toggle_select_button.setToolTip("Select all files.")
+    def _on_item_changed(self, item: QStandardItem):
+        if self._is_updating_checks: return
+        self._is_updating_checks = True
+        self._update_descendants(item)
+        self._update_ancestors(item)
+        self._is_updating_checks = False
+        self._update_toggle_button_state()
+
+    def _update_descendants(self, item: QStandardItem):
+        state = item.checkState()
+        if state == Qt.CheckState.PartiallyChecked: return
+        for i in range(item.rowCount()):
+            self._recursive_set_state(item.child(i), state)
+
+    def _update_ancestors(self, item: QStandardItem):
+        parent = item.parent()
+        while parent:
+            child_states = {parent.child(i).checkState() for i in range(parent.rowCount())}
+            new_state = Qt.CheckState.Unchecked
+            if all(s == Qt.CheckState.Checked for s in child_states):
+                new_state = Qt.CheckState.Checked
+            elif any(s != Qt.CheckState.Unchecked for s in child_states):
+                new_state = Qt.CheckState.PartiallyChecked
+            if parent.checkState() != new_state:
+                parent.setCheckState(new_state)
+            parent = parent.parent()
 
     def _get_all_checkable_items(self) -> List[QStandardItem]:
         items = []
         root = self.file_model.invisibleRootItem()
-
-        def recurse(parent_item):
-            for row in range(parent_item.rowCount()):
-                child = parent_item.child(row)
-                if child:
-                    if child.isCheckable():
-                        items.append(child)
-                    if child.hasChildren():
-                        recurse(child)
-        recurse(root)
+        stack = [root.child(i) for i in range(root.rowCount())]
+        while stack:
+            item = stack.pop()
+            if item and item.isCheckable():
+                items.append(item)
+                stack.extend(item.child(i) for i in range(item.rowCount()))
         return items
 
     def _are_all_items_checked(self) -> bool:
         items = self._get_all_checkable_items()
-        return bool(items) and all(
-            item.checkState() == Qt.CheckState.Checked for item in items)
+        if not items: return False
+        return all(item.checkState() == Qt.CheckState.Checked for item in items)
+
+    def _update_toggle_button_state(self):
+        if self._are_all_items_checked():
+            self.toggle_select_button.setIcon(qta.icon('fa5s.check-square', color='grey'))
+            self.toggle_select_button.setToolTip("Deselect all.")
+        else:
+            self.toggle_select_button.setIcon(qta.icon('fa5.square', color='grey'))
+            self.toggle_select_button.setToolTip("Select all.")
 
     def _populate_file_tree(self):
         self.file_model.clear()
         root_node = self.file_model.invisibleRootItem()
         path_map = {self.project_path: root_node}
-        ignore_dirs = {
-            '__pycache__', '.git', 'venv', '.venv', 'dist', 'build', 'logs',
-            'ai_exports'
-        }
+        ignore_dirs = {'__pycache__', '.git', 'venv', '.venv', 'dist', 'build', 'logs', 'ai_exports'}
         ignore_files = {'puffin_editor_settings.json'}
-        include_extensions = [
-            '.py', '.md', '.txt', '.json', '.html', '.css', '.js', '.yml',
-            '.bat'
-        ]
-        for dirpath, dirnames, filenames in os.walk(
-            self.project_path, topdown=True
-        ):
+        include_extensions = ['.py', '.md', '.txt', '.json', '.html', '.css', '.js', '.yml', '.bat', '.qss']
+
+        for dirpath, dirnames, filenames in os.walk(self.project_path, topdown=True):
             dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
             parent_node = path_map.get(os.path.normpath(dirpath))
-            if parent_node is None:
-                continue
+            if parent_node is None: continue
+
             for dirname in sorted(dirnames):
                 dir_item = QStandardItem(dirname)
                 dir_item.setIcon(qta.icon('fa5.folder', color='grey'))
                 dir_item.setCheckable(True)
-                dir_item.setCheckState(Qt.CheckState.Checked)
                 path = os.path.join(dirpath, dirname)
                 dir_item.setData(path, Qt.ItemDataRole.UserRole)
                 parent_node.appendRow(dir_item)
                 path_map[path] = dir_item
+
             for filename in sorted(filenames):
-                if filename in ignore_files:
-                    continue
-                ext_match = any(
-                    filename.lower().endswith(ext) for ext in include_extensions
-                )
-                if "LICENSE" not in filename and not ext_match:
+                if filename in ignore_files or not any(filename.lower().endswith(ext) for ext in include_extensions) and "LICENSE" not in filename:
                     continue
                 file_item = QStandardItem(filename)
                 file_item.setIcon(qta.icon('fa5.file-alt', color='grey'))
                 file_item.setCheckable(True)
-                file_item.setCheckState(Qt.CheckState.Checked)
                 path = os.path.join(dirpath, filename)
                 file_item.setData(path, Qt.ItemDataRole.UserRole)
                 parent_node.appendRow(file_item)
-        self.file_tree.expandToDepth(0)
 
-    def _on_item_changed(self, item: QStandardItem):
-        if self._is_updating_checks:
-            return
-        self._is_updating_checks = True
-        try:
-            check_state = item.checkState()
-            if check_state != Qt.CheckState.PartiallyChecked:
-                self._update_descendant_states(item, check_state)
-            if item.parent():
-                self._update_ancestor_states(item.parent())
-        finally:
-            self._is_updating_checks = False
-            self._update_toggle_button_state()
-
-    def _update_descendant_states(self, parent_item, state):
-        for row in range(parent_item.rowCount()):
-            child = parent_item.child(row)
-            if child and child.isCheckable() and child.checkState() != state:
-                child.setCheckState(state)
-                if child.hasChildren():
-                    self._update_descendant_states(child, state)
-
-    def _update_ancestor_states(self, parent_item):
-        if not parent_item:
-            return
-        child_states = [
-            parent_item.child(r).checkState() for r in
-            range(parent_item.rowCount())
-        ]
-        if all(s == Qt.CheckState.Checked for s in child_states):
-            new_state = Qt.CheckState.Checked
-        elif all(s == Qt.CheckState.Unchecked for s in child_states):
-            new_state = Qt.CheckState.Unchecked
-        else:
-            new_state = Qt.CheckState.PartiallyChecked
-        if parent_item.checkState() != new_state:
-            parent_item.setCheckState(new_state)
+        self._set_all_check_states(Qt.CheckState.Checked)
+        self.file_tree.collapseAll()
 
     def _get_checked_files(self) -> List[str]:
-        checked_files = []
-        root = self.file_model.invisibleRootItem()
-        for row in range(root.rowCount()):
-            self._recurse_get_checked(root.child(row), checked_files)
-        return checked_files
+        files = []
+        for item in self._get_all_checkable_items():
+            if item.checkState() == Qt.CheckState.Checked:
+                path = item.data(Qt.ItemDataRole.UserRole)
+                if path and os.path.isfile(path):
+                    files.append(path)
+        return files
 
-    def _recurse_get_checked(self, parent_item, file_list):
-        if parent_item.checkState() == Qt.CheckState.Unchecked:
+    def _load_and_populate_personas(self):
+        current_selection_id = self.persona_combo.currentData()
+        self.personas.clear(); self.persona_modules.clear(); self.persona_combo.clear()
+        self.persona_combo.addItem("No Persona (General Review)", None)
+        persona_dir = os.path.join(get_base_path(), "assets", "ai_personas")
+        if not os.path.isdir(persona_dir):
+            log.warning(f"AI Persona directory not found: {persona_dir}")
             return
-        path = parent_item.data(Qt.ItemDataRole.UserRole)
-        is_file = path and os.path.isfile(path)
-        is_checked = parent_item.checkState() == Qt.CheckState.Checked
-        if is_file and is_checked:
-            file_list.append(path)
-        if parent_item.hasChildren():
-            for row in range(parent_item.rowCount()):
-                if child := parent_item.child(row):
-                    self._recurse_get_checked(child, file_list)
 
-    def _load_prompt_source(self, prompt_type: str, filepath: str):
-        if os.path.exists(filepath):
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    self.prompt_sources[prompt_type] = json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                log.error(f"Failed to load prompts from {filepath}: {e}")
+        for filename in sorted(os.listdir(persona_dir)):
+            if filename.endswith(".py") and not filename.startswith("__"):
+                module_path = os.path.join(persona_dir, filename)
+                module_name = f"assets.ai_personas.{os.path.splitext(filename)[0]}"
+                try:
+                    spec = importlib.util.spec_from_file_location(module_name, module_path)
+                    if spec and spec.loader:
+                        module = importlib.util.module_from_spec(spec)
+                        if module_name in sys.modules:
+                            del sys.modules[module_name]
+                        sys.modules[module_name] = module
+                        spec.loader.exec_module(module)
+                        if hasattr(module, "get_persona_info"):
+                            info = module.get_persona_info()
+                            self.personas[info['id']] = info
+                            self.persona_modules[info['id']] = module
+                            self.persona_combo.addItem(f"{info['name']} - {info['title']}", info['id'])
+                except Exception as e:
+                    log.error(f"Failed to load AI persona '{filename}': {e}", exc_info=True)
 
-    def _load_and_populate_prompts(self):
-        self.loadouts = settings_manager.get("ai_export_loadouts", {})
-        self.prompt_sources = {PROMPT_TYPE_DEFAULT: DEFAULT_LOADOUTS}
-        base_path = get_base_path()
-        generative_path = os.path.join(
-            base_path, "assets", "prompts", "generative_prompts.json"
-        )
-        community_path = os.path.join(
-            base_path, "assets", "prompts", "additional_prompts.json"
-        )
-        self._load_prompt_source(PROMPT_TYPE_GENERATIVE, generative_path)
-        self._load_prompt_source(PROMPT_TYPE_COMMUNITY, community_path)
-        self.loadout_combo.clear()
-        self.loadout_combo.addItem("--- Select a Loadout ---", None)
-        self.loadout_combo.insertSeparator(self.loadout_combo.count())
-        self._add_prompts_to_combo("Default", PROMPT_TYPE_DEFAULT)
-        self._add_prompts_to_combo("New Feature", PROMPT_TYPE_GENERATIVE)
-        self._add_prompts_to_combo("Community", PROMPT_TYPE_COMMUNITY)
-        if self.loadouts:
-            self.loadout_combo.insertSeparator(self.loadout_combo.count())
-            for name in sorted(self.loadouts.keys()):
-                self.loadout_combo.addItem(name, (PROMPT_TYPE_USER, name))
-        self.loadout_combo.setCurrentIndex(0)
+        index_to_select = self.persona_combo.findData(current_selection_id)
+        self.persona_combo.setCurrentIndex(index_to_select if index_to_select != -1 else 0)
 
-    def _add_prompts_to_combo(self, prefix, prompt_type):
-        if source := self.prompt_sources.get(prompt_type):
-            self.loadout_combo.insertSeparator(self.loadout_combo.count())
-            for name in sorted(source.keys()):
-                self.loadout_combo.addItem(
-                    f"({prefix}) {name}", (prompt_type, name))
+    def _populate_style_presets(self):
+        self.rules_combo.clear()
+        self.preset_manager.presets = self.preset_manager.load_presets()
+        for preset_id, preset_name in self.preset_manager.get_preset_names_for_ui():
+            self.rules_combo.addItem(preset_name, preset_id)
 
-    def _on_loadout_selected(self, index):
-        data = self.loadout_combo.itemData(index)
-        if not data:
-            self.instructions_edit.clear()
-            self.guidelines_list.clear()
+    def _on_persona_selected(self, index: int):
+        persona_id = self.persona_combo.itemData(index)
+
+        if not persona_id:
+            self.persona_desc_label.setText("<i>A general-purpose review will be performed using a standard prompt. All files are selected by default.</i>")
+            self._set_all_check_states(Qt.CheckState.Checked)
             return
-        prompt_type, name = data
-        if prompt_type == PROMPT_TYPE_USER:
-            loadout_data = self.loadouts.get(name)
-        else:
-            loadout_data = self.prompt_sources.get(prompt_type, {}).get(name)
 
-        if loadout_data:
-            self.instructions_edit.setText(loadout_data.get("instructions", ""))
-            self.guidelines_list.clear()
-            self.guidelines_list.addItems(loadout_data.get("guidelines", []))
-        is_user_loadout = (prompt_type == PROMPT_TYPE_USER)
-        self.save_loadout_button.setText("Save As New...")
-        self.save_loadout_button.setToolTip(
-            "Save the current configuration as a new custom loadout.")
-        self.delete_loadout_button.setEnabled(is_user_loadout)
-        self.delete_loadout_button.setToolTip(
-            "Delete this custom loadout." if is_user_loadout else
-            "Cannot delete built-in loadouts."
-        )
-        if is_user_loadout:
-            self.save_loadout_button.setText(f"Update '{name}'")
-            self.save_loadout_button.setToolTip(
-                f"Update the custom loadout '{name}'.")
+        if persona_info := self.personas.get(persona_id):
+            self.persona_desc_label.setText(f"<b>Expertise:</b> {persona_info.get('expertise', 'N/A')}")
 
-    def _save_loadout(self):
-        data = self.loadout_combo.currentData()
-        is_update = data and data[0] == PROMPT_TYPE_USER
-        name_to_save = data[1] if is_update else None
-        if not is_update:
-            name, ok = QInputDialog.getText(
-                self, "Save Loadout As", "Enter name for new loadout:")
-            if not (ok and name):
-                return
-            if name in self.loadouts or any(
-                name in s for s in self.prompt_sources.values()
-            ):
-                QMessageBox.warning(self, "Name Exists",
-                                    "A loadout with this name already exists.")
-                return
-            name_to_save = name
-        guidelines = [self.guidelines_list.item(i).text() for i in
-                      range(self.guidelines_list.count())]
-        self.loadouts[name_to_save] = {
-            "instructions": self.instructions_edit.toPlainText(),
-            "guidelines": guidelines
+        files_to_select = get_files_for_persona(persona_id, self.project_path)
+        if not files_to_select:
+            self._set_all_check_states(Qt.CheckState.Checked)
+            return
+
+        self._set_all_check_states(Qt.CheckState.Unchecked)
+        self._is_updating_checks = True
+        for item in self._get_all_checkable_items():
+            path = item.data(Qt.ItemDataRole.UserRole)
+            if path in files_to_select:
+                item.setCheckState(Qt.CheckState.Checked)
+                self._update_ancestors(item)
+        self._is_updating_checks = False
+        self._update_toggle_button_state()
+
+    def _build_prompt(self, user_goal: str, files: List[str], problems: Dict[str, List[Dict]]) -> Optional[Tuple[str, str]]:
+        persona_id = self.persona_combo.currentData()
+        style_preset_id = self.rules_combo.currentData()
+        style_rules = []
+        if style_preset_id and (preset := self.preset_manager.presets.get(style_preset_id)):
+            style_rules = preset.get("rules", [])
+
+        context = {
+            "user_instructions": user_goal,
+            "file_tree": self._generate_file_tree_text(files),
+            "file_contents": {path: self._read_file(path) for path in files},
+            "linter_results": problems,
+            "project_root": self.project_path,
+            "golden_rules": golden_rules.get_golden_rules_text().splitlines(),
+            "style_rules": style_rules
         }
-        settings_manager.set("ai_export_loadouts", self.loadouts)
-        self._load_and_populate_prompts()
-        new_index = self.loadout_combo.findData((PROMPT_TYPE_USER, name_to_save))
-        if new_index != -1:
-            self.loadout_combo.setCurrentIndex(new_index)
-        QMessageBox.information(
-            self, "Success", f"Loadout '{name_to_save}' saved.")
 
-    def _delete_loadout(self):
-        data = self.loadout_combo.currentData()
-        if not data or data[0] != PROMPT_TYPE_USER:
-            return
-        name_to_delete = data[1]
-        reply = QMessageBox.question(
-            self, "Confirm Delete", f"Delete '{name_to_delete}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes and name_to_delete in self.loadouts:
-            del self.loadouts[name_to_delete]
-            settings_manager.set("ai_export_loadouts", self.loadouts)
-            self._load_and_populate_prompts()
+        if not persona_id:
+            system_prompt = "You are a helpful and experienced software developer. Your goal is to perform a general code review based on the user's instructions and the provided files. Offer concrete suggestions for improvement."
+            file_contents_section = []
+            for path, content in context["file_contents"].items():
+                relative_path = os.path.relpath(path, context["project_root"]).replace(os.sep, '/')
+                lang = os.path.splitext(path)[1].lstrip('.') or 'text'
+                file_contents_section.append(f"### File: `/{relative_path}`\n```{lang}\n{content}\n```")
+            file_contents_str = "\n\n".join(file_contents_section)
 
-    def _add_guideline(self):
-        text, ok = QInputDialog.getText(
-            self, "Add Guideline", "Enter new guideline:")
-        if ok and text:
-            self.guidelines_list.addItem(QListWidgetItem(text))
+            user_prompt = f"""
+# Project Review Request
 
-    def _edit_guideline(self):
-        if not (item := self.guidelines_list.currentItem()):
-            return
-        text, ok = QInputDialog.getText(
-            self, "Edit Guideline", "Edit guideline:", text=item.text())
-        if ok and text:
-            item.setText(text)
+**User's Goal:**
+{context.get("user_instructions") or "Perform a general review of the provided code."}
 
-    def _remove_guideline(self):
-        if (item := self.guidelines_list.currentItem()):
-            row = self.guidelines_list.row(item)
-            self.guidelines_list.takeItem(row)
+---
+**Project File Tree:**
+```
+{context.get("file_tree", "No file tree provided.")}
+```
+---
+**Files for Review:**
+{file_contents_str}
+"""
+            return system_prompt.strip(), user_prompt.strip()
 
-    def _load_and_populate_golden_rule_sets(self):
-        self.golden_rule_sets = settings_manager.get(
-            "ai_export_golden_rules", {})
-        self.golden_rules_combo.clear()
-        self.golden_rules_combo.addItem("--- Select a Rule Set ---", None)
-        self.golden_rules_combo.insertSeparator(self.golden_rules_combo.count())
-        for name in sorted(self.golden_rule_sets.keys()):
-            self.golden_rules_combo.addItem(name)
-        if "Default Golden Rules" in self.golden_rule_sets:
-            self.golden_rules_combo.setCurrentText("Default Golden Rules")
-        else:
-            self.golden_rules_combo.setCurrentIndex(0)
-
-    def _on_golden_rule_set_selected(self, index):
-        name = self.golden_rules_combo.currentText()
-        is_user_set = name not in ["--- Select a Rule Set ---"]
-        if rules := self.golden_rule_sets.get(name):
-            self.golden_rules_list.clear()
-            self.golden_rules_list.addItems(rules)
-        self.save_golden_rules_button.setText("Save As New...")
-        self.save_golden_rules_button.setToolTip(
-            "Save the current rules as a new set.")
-        self.delete_golden_rules_button.setEnabled(
-            is_user_set and name != "Default Golden Rules")
-        if is_user_set:
-            self.save_golden_rules_button.setText(f"Update '{name}'")
-            self.save_golden_rules_button.setToolTip(
-                f"Update the rule set '{name}'.")
-
-    def _save_golden_rule_set(self):
-        current_name = self.golden_rules_combo.currentText()
-        is_update = current_name not in ["--- Select a Rule Set ---"]
-        name_to_save = current_name if is_update else None
-        if not is_update:
-            name, ok = QInputDialog.getText(
-                self, "Save Rule Set", "Enter name for rule set:")
-            if not (ok and name):
-                return
-            if name in self.golden_rule_sets:
-                QMessageBox.warning(
-                    self, "Name Exists",
-                    "A rule set with this name already exists.")
-                return
-            name_to_save = name
-        rules = [self.golden_rules_list.item(i).text() for i in
-                 range(self.golden_rules_list.count())]
-        self.golden_rule_sets[name_to_save] = rules
-        settings_manager.set("ai_export_golden_rules", self.golden_rule_sets)
-        self._load_and_populate_golden_rule_sets()
-        if (new_index := self.golden_rules_combo.findText(name_to_save)) != -1:
-            self.golden_rules_combo.setCurrentIndex(new_index)
-        QMessageBox.information(
-            self, "Success", f"Golden Rule set '{name_to_save}' saved.")
-
-    def _delete_golden_rule_set(self):
-        name = self.golden_rules_combo.currentText()
-        if name in self.golden_rule_sets and name != "Default Golden Rules":
-            reply = QMessageBox.question(
-                self, "Confirm Delete", f"Delete the rule set '{name}'?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.Yes:
-                del self.golden_rule_sets[name]
-                settings_manager.set(
-                    "ai_export_golden_rules", self.golden_rule_sets)
-                self._load_and_populate_golden_rule_sets()
-
-    def _add_golden_rule(self):
-        text, ok = QInputDialog.getText(
-            self, "Add Golden Rule", "Enter new rule:")
-        if ok and text:
-            self.golden_rules_list.addItem(QListWidgetItem(text))
-
-    def _edit_golden_rule(self):
-        if not (item := self.golden_rules_list.currentItem()):
-            return
-        text, ok = QInputDialog.getText(
-            self, "Edit Golden Rule", "Edit rule:", text=item.text())
-        if ok and text:
-            item.setText(text)
-
-    def _remove_golden_rule(self):
-        if (item := self.golden_rules_list.currentItem()):
-            row = self.golden_rules_list.row(item)
-            self.golden_rules_list.takeItem(row)
-
-    def _generate_file_content_string(
-        self, files: List[str], problems: Dict[str, List[Dict]]
-    ) -> str:
-        """Generates the file content portion of the prompt as a string."""
-        content_parts = []
-        for file_path in files:
-            rel_path = os.path.relpath(
-                file_path, self.project_path).replace(os.sep, '/')
-            content_parts.append(f"### File: `/{rel_path}`\n")
-            if file_problems := problems.get(file_path):
-                content_parts.append("#### Linter Issues Found:\n```\n")
-                for p in file_problems:
-                    line_info = f"- L{p.get('line', '?')}"
-                    if 'column' in p and p.get('column') is not None:
-                        line_info += f":C{p.get('column')}"
-                    code = p.get('code', 'N/A')
-                    message = p.get('message', 'No message available')
-                    msg = f"{line_info} ({code}) {message}\n"
-                    content_parts.append(msg)
-                content_parts.append("```\n\n")
+        if module := self.persona_modules.get(persona_id):
             try:
-                with open(file_path, 'r', encoding='utf-8') as cf:
-                    content = cf.read()
-                lang = self._get_lang_for_file(file_path)
-                content_parts.append(f"```{lang}\n{content}\n```\n")
+                persona_instance = module.get_persona_instance()
+                return persona_instance.generate_prompt(context)
             except Exception as e:
-                content_parts.append(f"```\nError reading file: {e}\n```\n")
-        return "\n".join(content_parts)
+                log.error(f"Error in prompt generation for '{persona_id}': {e}", exc_info=True)
+                QMessageBox.critical(self, "Prompt Generation Error", f"Could not generate prompt: {e}")
+                return None
+
+        log.error(f"Could not load module for selected persona ID: {persona_id}")
+        QMessageBox.critical(self, "Error", "The selected AI persona could not be loaded.")
+        return None
+
+    def _read_file(self, file_path: str) -> str:
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                return f.read()
+        except Exception as e:
+            return f"[Error reading file: {e}]"
 
     def _generate_file_tree_text(self, files: List[str]) -> str:
-        tree = {}
-        base_path = self.project_path
+        tree, base_path = {}, self.project_path
         for f in files:
-            rel_path = os.path.relpath(f, base_path)
-            parts = rel_path.split(os.sep)
-            curr_level = tree
-            for part in parts[:-1]:
-                curr_level = curr_level.setdefault(part, {})
-            curr_level[parts[-1]] = None
+            rel_path = os.path.relpath(f, base_path).replace(os.sep, '/')
+            parts, curr = rel_path.split('/'), tree
+            for part in parts[:-1]: curr = curr.setdefault(part, {})
+            curr[parts[-1]] = None
 
-        def build_tree_string(d, indent=''):
-            s = ''
-            items = sorted(d.items())
-            for i, (key, value) in enumerate(items):
+        def build_string(d, indent=''):
+            s, items = '', sorted(d.items())
+            for i, (key, val) in enumerate(items):
                 is_last = i == len(items) - 1
-                s += indent + ('└── ' if is_last else '├── ') + key + '\n'
-                if value is not None:
-                    new_indent = indent + ('    ' if is_last else '│   ')
-                    s += build_tree_string(value, new_indent)
+                s += f"{indent}{'└── ' if is_last else '├── '}{key}\n"
+                if val is not None: s += build_string(val, f"{indent}{'    ' if is_last else '│   '}")
             return s
-        return (f"/{os.path.basename(base_path)}\n"
-                f"{build_tree_string(tree, ' ')}")
-
-    def _get_lang_for_file(self, file_path: str) -> str:
-        ext = os.path.splitext(file_path)[1].lower()
-        return {
-            '.py': 'python', '.json': 'json', '.md': 'markdown',
-            '.html': 'html', '.css': 'css', '.js': 'javascript',
-            '.ts': 'typescript', '.yml': 'yaml', '.yaml': 'yaml',
-            '.xml': 'xml', '.sh': 'shell', '.bat': 'batch',
-        }.get(ext, 'text')
-
-    def _build_prompt(
-        self, instructions, guidelines, golden_rules, files, problems
-    ) -> tuple[str, str]:
-        """Builds system and user prompts for an API request."""
-        system_parts = []
-        if instructions:
-            system_parts.append(f"## AI Instructions\n{instructions}")
-        if guidelines:
-            rules_str = "\n".join(f"- {rule}" for rule in guidelines)
-            system_parts.append(f"## Guidelines & Rules\n{rules_str}")
-        if golden_rules:
-            rules_str = "\n".join(
-                f"{i}. {rule}" for i, rule in enumerate(golden_rules, 1))
-            system_parts.append(f"## Golden Rules\n{rules_str}")
-        system_prompt = "\n\n".join(system_parts)
-        user_prompt = "\n".join([
-            "Here is the project context you need to work with.",
-            "## File Tree\n```",
-            self._generate_file_tree_text(files),
-            "```",
-            "## File Contents",
-            self._generate_file_content_string(files, problems)
-        ])
-        return system_prompt, user_prompt
+        return f"/{os.path.basename(base_path)}\n{build_string(tree, ' ')}"
 
     def _start_export(self):
+        self.ok_button.setEnabled(False)
         self.selected_files = self._get_checked_files()
         if not self.selected_files:
-            QMessageBox.warning(
-                self, "No Files Selected", "Please select files to include.")
-            return
-        self.progress = QProgressDialog(
-            "Linting selected files...", "Cancel", 0, 0, self)
+             QMessageBox.warning(self, "No Files Selected", "No files are checked. Please select at least one file.")
+             self.ok_button.setEnabled(True)
+             return
+
+        self.progress = QProgressDialog("Linting selected files...", "Cancel", 0, 0, self)
         self.progress.setWindowModality(Qt.WindowModality.WindowModal)
         self.progress.show()
         QCoreApplication.processEvents()
-        self.linter_manager.project_lint_results_ready.connect(
-            self._on_lint_complete)
+
+        try: self.linter_manager.project_lint_results_ready.disconnect(self._on_lint_complete)
+        except TypeError: pass
+        self.linter_manager.project_lint_results_ready.connect(self._on_lint_complete)
         self.linter_manager.lint_project(self.project_path)
 
     def _on_lint_complete(self, all_problems: Dict[str, List[Dict]]):
-        self.linter_manager.project_lint_results_ready.disconnect(
-            self._on_lint_complete)
         if self.progress.wasCanceled():
+            self.ok_button.setEnabled(True)
             return
 
         self.progress.setLabelText("Preparing context...")
         QCoreApplication.processEvents()
 
-        instructions = self.instructions_edit.toPlainText()
-        guidelines = [self.guidelines_list.item(i).text() for i in
-                      range(self.guidelines_list.count())]
-        golden_rules = [self.golden_rules_list.item(i).text() for i in
-                        range(self.golden_rules_list.count())]
+        user_goal = self.user_goal_edit.toPlainText().strip()
+        selected_problems = {k: v for k, v in all_problems.items() if self.include_linter_checkbox.isChecked() and k in self.selected_files}
+        prompt_data = self._build_prompt(user_goal, self.selected_files, selected_problems)
 
-        selected_problems = {}
-        if self.include_linter_checkbox.isChecked():
-            selected_problems = {k: v for k, v in all_problems.items()
-                                 if k in self.selected_files}
+        if not prompt_data:
+            self.progress.close()
+            self.ok_button.setEnabled(True)
+            return
+
+        system_prompt, user_prompt = prompt_data
 
         if self.api_mode_checkbox.isChecked():
             self.progress.setLabelText("Sending to AI...")
-            self._handle_api_request(
-                instructions, guidelines, golden_rules, selected_problems)
+            self._handle_api_request(system_prompt, user_prompt)
         else:
             self.progress.setLabelText("Saving file...")
-            self._handle_file_export(
-                instructions, guidelines, golden_rules, selected_problems)
+            self._handle_file_export(system_prompt, user_prompt)
+
         if not self.progress.wasCanceled():
             self.progress.close()
 
-    def _handle_api_request(
-        self, instructions, guidelines, golden_rules, problems
-    ):
+        self.ok_button.setEnabled(True)
+        try:
+            self.linter_manager.project_lint_results_ready.disconnect(self._on_lint_complete)
+        except TypeError:
+            pass # Already disconnected
+
+    def _handle_api_request(self, system_prompt: str, user_prompt: str):
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
         try:
-            provider = self.api_provider_combo.currentText()
-            model = self.api_model_combo.currentText()
-            system_prompt, user_prompt = self._build_prompt(
-                instructions, guidelines, golden_rules, self.selected_files,
-                problems
-            )
-            success, response = self.api_client.send_request(
-                provider, model, system_prompt, user_prompt)
-
+            provider, model = self.api_provider_combo.currentText(), self.api_model_combo.currentText()
+            success, response = self.api_client.send_request(provider, model, system_prompt, user_prompt)
             if success:
-                response_dialog = AIResponseDialog(response, self)
-                response_dialog.exec()
+                AIResponseDialog(response, self).exec()
                 self.accept()
             else:
                 QMessageBox.critical(self, "API Error", response)
         finally:
             QApplication.restoreOverrideCursor()
 
-    def _handle_file_export(
-        self, instructions, guidelines, golden_rules, problems
-    ):
-        base_path = get_base_path()
-        export_dir = os.path.join(base_path, "ai_exports")
-        try:
-            os.makedirs(export_dir, exist_ok=True)
-        except OSError as e:
-            msg = f"Could not create export directory at {export_dir}: {e}"
-            log.error(msg)
-            QMessageBox.critical(self, "Export Failed", msg)
-            return
-
+    def _handle_file_export(self, system_prompt: str, user_prompt: str):
+        export_dir = os.path.join(get_base_path(), "ai_exports")
+        os.makedirs(export_dir, exist_ok=True)
         proj_name = os.path.basename(self.project_path)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"{proj_name}_export_{timestamp}.md"
-        output_filepath = os.path.join(export_dir, filename)
-
+        persona_name = self.persona_combo.currentText().split(' - ')[0].replace(' ', '_')
+        output_filepath = os.path.join(export_dir, f"{proj_name}_{persona_name}_{timestamp}.md")
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
         try:
-            if "Standard Markdown" in self.format_combo.currentText():
-                success, msg = self.project_manager.export_project_for_ai(
-                    output_filepath=output_filepath,
-                    selected_files=self.selected_files,
-                    instructions=instructions, guidelines=guidelines,
-                    golden_rules=golden_rules, all_problems=problems
-                )
-                if success:
-                    message = f"Project exported successfully to:\n{output_filepath}"
-                else:
-                    message = msg
-            else:
-                system_prompt, user_prompt = self._build_prompt(
-                    instructions, guidelines, golden_rules,
-                    self.selected_files, problems)
-                header = (
-                    f"# Project Export: {os.path.basename(self.project_path)}\n"
-                    f"## Export Timestamp: {datetime.now().isoformat()}\n---"
-                )
-                content = "\n\n".join(
-                    [header, system_prompt, "---", "## Project Files", user_prompt]
-                )
-                with open(output_filepath, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                success = True
-                message = f"Project exported successfully to:\n{output_filepath}"
+            # Using triple quotes correctly for the main content block
+            content = f"""# AI Task: {self.persona_combo.currentText()}
+## Timestamp: {datetime.now().isoformat()}
 
-            if success:
-                QMessageBox.information(self, "Export Complete", message)
-                self.accept()
-            else:
-                QMessageBox.critical(self, "Export Failed", message)
+---SYSTEM-PROMPT---
+
+{system_prompt}
+
+---USER-PROMPT---
+
+{user_prompt}
+"""
+            with open(output_filepath, 'w', encoding='utf-8') as f: f.write(content)
+            QMessageBox.information(self, "Export Complete", f"Project context exported to:\n{output_filepath}")
+            self.accept()
         except Exception as e:
-            log.error(f"Export failed with exception: {e}", exc_info=True)
-            QMessageBox.critical(self, "Export Failed",
-                                 f"An error occurred: '{e}'")
+            log.error(f"Export failed: {e}", exc_info=True)
+            QMessageBox.critical(self, "Export Failed", f"An error occurred: '{e}'")
         finally:
             QApplication.restoreOverrideCursor()

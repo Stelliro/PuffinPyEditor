@@ -15,6 +15,11 @@ class EnhancedExceptionsPlugin:
         log.info("Enhanced Exception Reporter initialized and hook installed.")
 
     def show_exception_dialog(self, exc_type, exc_value, exc_tb):
+        # CORRECTED: Specifically ignore KeyboardInterrupt.
+        if issubclass(exc_type, KeyboardInterrupt):
+            log.warning("KeyboardInterrupt caught and ignored by the main thread.")
+            return
+
         log.critical("Unhandled exception caught by Enhanced Reporter:",
                      exc_info=(exc_type, exc_value, exc_tb))
         dialog = ExceptionDialog(exc_type, exc_value, exc_tb, self.main_window)
